@@ -367,6 +367,7 @@ fn render_native_timeline(
     total_duration: f64,
     format: String,
     background_color: String,
+    background_blur: f64,
 ) -> Result<String, String> {
     CANCEL_NATIVE_RENDER.store(false, Ordering::SeqCst);
     if clips.is_empty()
@@ -449,7 +450,11 @@ fn render_native_timeline(
         } else {
             String::new()
         };
-        filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background_color},fps={fps},setsar=1,format=yuv420p{blur}{setpts}[v{index}];"));
+        if background_blur > 0.0 && clip.kind != "blank" {
+            filter.push_str(&format!("[{index}:v]split=2[bgraw{index}][fgraw{index}];[bgraw{index}]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},gblur=sigma={},fps={fps},setsar=1[bg{index}];[fgraw{index}]scale={width}:{height}:force_original_aspect_ratio=decrease,format=rgba{blur}[fg{index}];[bg{index}][fg{index}]overlay=(W-w)/2:(H-h)/2,format=yuv420p{setpts}[v{index}];", background_blur.min(100.0)));
+        } else {
+            filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background_color},fps={fps},setsar=1,format=yuv420p{blur}{setpts}[v{index}];"));
+        }
     }
     for index in 0..clips.len() {
         filter.push_str(&format!("[v{index}]"));

@@ -152,12 +152,6 @@ function ExportPopover({
 
 	const handleNativeExport = async () => {
 		if (!window.__TAURI__) return;
-		if (activeProject.settings.background.type === "blur") {
-			toast.error(
-				"Background blur chưa hỗ trợ Native GPU; hãy dùng màu nền hoặc Export OpenCut.",
-			);
-			return;
-		}
 		const scene = editor.scenes.getActiveScene();
 		const assets = new Map(
 			editor.media.getAssets().map((asset) => [asset.id, asset]),
@@ -425,7 +419,14 @@ function ExportPopover({
 				quality,
 				totalDuration: editor.timeline.getTotalDuration() / TICKS_PER_SECOND,
 				format,
-				backgroundColor: activeProject.settings.background.color,
+				backgroundColor:
+					activeProject.settings.background.type === "color"
+						? activeProject.settings.background.color
+						: "black",
+				backgroundBlur:
+					activeProject.settings.background.type === "blur"
+						? activeProject.settings.background.blurIntensity / 5
+						: 0,
 			});
 			toast.success("Đã xuất video bằng FFmpeg/GPU", {
 				description: outputPath,
