@@ -21,6 +21,8 @@ The first local automation workflow is available at <http://localhost:3000/autom
 
 - image + audio to H.264/AAC MP4;
 - Full HD and 4K presets;
+- media conversion to MP3 320 kbps, WAV PCM, or H.264/AAC MP4;
+- join 2–50 audio files into a 320 kbps MP3 playlist, with optional random ordering;
 - FFmpeg availability check and downloadable completed jobs.
 
 The PowerShell launcher enables the local-only API and uses `E:\CGT Auto Tools v1.3.0\ffmpeg.exe` when present. Override `HOVACUT_FFMPEG_PATH` before launching to select another build. The execution API stays disabled on normal public deployments.
