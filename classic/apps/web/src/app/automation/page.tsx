@@ -304,12 +304,12 @@ export default function AutomationPage() {
 	const handleDesktopAutoVideo = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (!window.__TAURI__ || !desktopAudioPath || desktopVideoPaths.length === 0) return setError("Chọn audio và thư mục video.");
+		const resolution = String(new FormData(event.currentTarget).get("resolution") ?? "1080p");
 		const outputPath = await window.__TAURI__.dialog.save({ defaultPath: "hovacut-auto-video.mp4", filters: [{ name: "MP4 Video", extensions: ["mp4"] }] });
 		if (!outputPath) return;
 		setError(null);
 		setActiveJob("auto-video");
 		try {
-			const resolution = String(new FormData(event.currentTarget).get("resolution") ?? "1080p");
 			await window.__TAURI__.core.invoke("render_auto_video", { audioPath: desktopAudioPath, videoPaths: desktopVideoPaths, outputPath, resolution });
 			setJobs((current) => [{ id: crypto.randomUUID(), filename: outputPath.split(/[\\/]/).pop() ?? "hovacut-auto-video.mp4", url: "", createdAt: new Date() }, ...current]);
 		} catch (reason) {
