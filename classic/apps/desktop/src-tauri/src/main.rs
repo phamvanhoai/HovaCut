@@ -70,7 +70,7 @@ fn encoder_available(encoder: &str) -> bool {
             "-f",
             "lavfi",
             "-i",
-            "color=s=64x64:d=0.1",
+            "color=s=256x256:d=0.1",
             "-frames:v",
             "1",
             "-c:v",
