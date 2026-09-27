@@ -47,6 +47,7 @@ import {
 } from "@/components/editor/panels/assets/assets-panel-store";
 import { MASKABLE_ELEMENT_TYPES } from "@/timeline";
 import type { MediaAsset } from "@/media/types";
+import { getMimeTypeFromName } from "@/media/media-utils";
 import { cn } from "@/utils/ui";
 import {
 	CloudUploadIcon,
@@ -77,7 +78,13 @@ export function MediaView() {
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [progress, setProgress] = useState(0);
 
-	const processFiles = async ({ files }: { files: File[] }) => {
+	const processFiles = async ({
+		files,
+		sourcePaths,
+	}: {
+		files: File[];
+		sourcePaths?: string[];
+	}) => {
 		if (!files || files.length === 0) return;
 		if (!activeProject) {
 			toast.error("No active project");
@@ -92,6 +99,7 @@ export function MediaView() {
 				promise: async () => {
 					const processedAssets = await processMediaAssets({
 						files,
+						sourcePaths,
 						onProgress: (progress: { progress: number }) =>
 							setProgress(progress.progress),
 					});
@@ -121,6 +129,65 @@ export function MediaView() {
 			multiple: true,
 			onFilesSelected: (files) => processFiles({ files }),
 		});
+
+	const openNativeFilePicker = async () => {
+		if (!window.__TAURI__) {
+			openFilePicker();
+			return;
+		}
+		const selected = await window.__TAURI__.dialog.open({
+			multiple: true,
+			directory: false,
+			filters: [
+				{
+					name: "Media",
+					extensions: [
+						"mp4",
+						"mov",
+						"mkv",
+						"webm",
+						"avi",
+						"m4v",
+						"mp3",
+						"wav",
+						"m4a",
+						"aac",
+						"ogg",
+						"flac",
+						"opus",
+						"png",
+						"jpg",
+						"jpeg",
+						"webp",
+						"gif",
+						"svg",
+					],
+				},
+			],
+		});
+		const paths = typeof selected === "string" ? [selected] : selected;
+		if (!paths?.length) return;
+		try {
+			const files = await Promise.all(
+				paths.map(async (path) => {
+					const response = await fetch(
+						window.__TAURI__!.core.convertFileSrc(path),
+					);
+					if (!response.ok) throw new Error(`Không thể đọc ${path}`);
+					const blob = await response.blob();
+					const name = path.split(/[\\/]/).pop() ?? "media";
+					return new File([blob], name, {
+						type: getMimeTypeFromName({ name }),
+					});
+				}),
+			);
+			await processFiles({ files, sourcePaths: paths });
+		} catch (error) {
+			toast.error("Không thể nhập media", {
+				description: error instanceof Error ? error.message : "Có lỗi xảy ra",
+			});
+		}
+	};
 
 	const handleRemove = ({
 		event,
@@ -201,7 +268,7 @@ export function MediaView() {
 						sortBy={mediaSortBy}
 						sortOrder={mediaSortOrder}
 						onSort={handleSort}
-						onImport={openFilePicker}
+						onImport={openNativeFilePicker}
 					/>
 				}
 				className={cn(isDragOver && "bg-accent/30")}
@@ -213,7 +280,7 @@ export function MediaView() {
 						isVisible={true}
 						isProcessing={isProcessing}
 						progress={progress}
-						onClick={openFilePicker}
+						onClick={openNativeFilePicker}
 					/>
 				) : (
 					<SelectableSurface

@@ -23,12 +23,31 @@ import {
 } from "@/services/storage/migrations";
 import type { Bookmark, SceneTracks, TScene } from "@/timeline";
 import { roundMediaTime } from "@/wasm";
+import { getMimeTypeFromName } from "@/media/media-utils";
 
-type DesktopWindow = Window & { __TAURI__?: { core: { invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T> } } };
+type DesktopWindow = Window & {
+	__TAURI__?: {
+		core: {
+			invoke: <T>(
+				command: string,
+				args?: Record<string, unknown>,
+			) => Promise<T>;
+			convertFileSrc?: (path: string) => string;
+		};
+	};
+};
 
-function desktopInvoke<T>({ command, args }: { command: string; args: Record<string, unknown> }) {
+function desktopInvoke<T>({
+	command,
+	args,
+}: {
+	command: string;
+	args: Record<string, unknown>;
+}) {
 	if (typeof window === "undefined") return null;
-	return (window as DesktopWindow).__TAURI__?.core.invoke<T>(command, args) ?? null;
+	return (
+		(window as DesktopWindow).__TAURI__?.core.invoke<T>(command, args) ?? null
+	);
 }
 
 function normalizeBookmarks({ raw }: { raw: unknown }): Bookmark[] {
@@ -173,7 +192,10 @@ class StorageService {
 			value: serializedProject,
 		});
 		try {
-			await desktopInvoke({ command: "save_project_json", args: { projectId: project.metadata.id, project: serializedProject } });
+			await desktopInvoke({
+				command: "save_project_json",
+				args: { projectId: project.metadata.id, project: serializedProject },
+			});
 		} catch (error) {
 			console.error("Failed to mirror project to desktop storage:", error);
 		}
@@ -188,8 +210,12 @@ class StorageService {
 		let serializedProject = await this.projectsAdapter.get(id);
 		if (!serializedProject) {
 			try {
-				serializedProject = await desktopInvoke<SerializedProject | null>({ command: "load_project_json", args: { projectId: id } });
-				if (serializedProject) await this.projectsAdapter.set({ key: id, value: serializedProject });
+				serializedProject = await desktopInvoke<SerializedProject | null>({
+					command: "load_project_json",
+					args: { projectId: id },
+				});
+				if (serializedProject)
+					await this.projectsAdapter.set({ key: id, value: serializedProject });
 			} catch (error) {
 				console.error("Failed to restore project from desktop storage:", error);
 			}
@@ -303,13 +329,20 @@ class StorageService {
 	async deleteProject({ id }: { id: string }): Promise<void> {
 		await this.projectsAdapter.remove(id);
 		try {
-			await desktopInvoke({ command: "delete_project_json", args: { projectId: id } });
+			await desktopInvoke({
+				command: "delete_project_json",
+				args: { projectId: id },
+			});
 		} catch (error) {
 			console.error("Failed to delete desktop project file:", error);
 		}
 	}
 
-	async importDesktopProject({ inputPath }: { inputPath: string }): Promise<string> {
+	async importDesktopProject({
+		inputPath,
+	}: {
+		inputPath: string;
+	}): Promise<string> {
 		const serializedProject = await desktopInvoke<SerializedProject>({
 			command: "import_project_json",
 			args: { inputPath },
@@ -353,6 +386,8 @@ class StorageService {
 			type: mediaAsset.type,
 			size: mediaAsset.file.size,
 			lastModified: mediaAsset.file.lastModified,
+			mimeType: mediaAsset.file.type,
+			sourcePath: mediaAsset.sourcePath,
 			width: mediaAsset.width,
 			height: mediaAsset.height,
 			duration: mediaAsset.duration,
@@ -361,10 +396,12 @@ class StorageService {
 		};
 
 		try {
-			await mediaAssetsAdapter.set({
-				key: mediaAsset.id,
-				value: mediaAsset.file,
-			});
+			if (!mediaAsset.sourcePath) {
+				await mediaAssetsAdapter.set({
+					key: mediaAsset.id,
+					value: mediaAsset.file,
+				});
+			}
 			await mediaMetadataAdapter.set({
 				key: mediaAsset.id,
 				value: metadata,
@@ -396,12 +433,30 @@ class StorageService {
 		const { mediaMetadataAdapter, mediaAssetsAdapter } =
 			this.getProjectMediaAdapters({ projectId });
 
-		const [file, metadata] = await Promise.all([
+		const [storedFile, metadata] = await Promise.all([
 			mediaAssetsAdapter.get(id),
 			mediaMetadataAdapter.get(id),
 		]);
 
-		if (!file || !metadata) return null;
+		if (!metadata) return null;
+		let file = storedFile;
+		if (!file && metadata.sourcePath && typeof window !== "undefined") {
+			const url = (window as DesktopWindow).__TAURI__?.core.convertFileSrc?.(
+				metadata.sourcePath,
+			);
+			if (url) {
+				const response = await fetch(url);
+				if (!response.ok)
+					throw new Error(`Không thể đọc media: ${metadata.name}`);
+				const blob = await response.blob();
+				file = new File([blob], metadata.name, {
+					type:
+						metadata.mimeType || getMimeTypeFromName({ name: metadata.name }),
+					lastModified: metadata.lastModified,
+				});
+			}
+		}
+		if (!file) return null;
 
 		let url: string;
 		if (metadata.type === "image" && (!file.type || file.type === "")) {
@@ -425,6 +480,7 @@ class StorageService {
 			name: metadata.name,
 			type: metadata.type,
 			file,
+			sourcePath: metadata.sourcePath,
 			url,
 			width: metadata.width,
 			height: metadata.height,

@@ -19,7 +19,10 @@
 				"maximized": true
 			}
 		],
-		"security": { "csp": null }
+		"security": {
+			"csp": null,
+			"assetProtocol": { "enable": true, "scope": ["**"] }
+		}
 	},
 	"bundle": {
 		"active": true,

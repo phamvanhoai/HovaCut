@@ -84,9 +84,11 @@ async function generateImageThumbnail({
 
 export async function processMediaAssets({
 	files,
+	sourcePaths,
 	onProgress,
 }: {
 	files: FileList | File[];
+	sourcePaths?: string[];
 	onProgress?: ({ progress }: { progress: number }) => void;
 }): Promise<ProcessedMediaAsset[]> {
 	const fileArray = Array.from(files);
@@ -95,7 +97,7 @@ export async function processMediaAssets({
 	const total = fileArray.length;
 	let completed = 0;
 
-	for (const file of fileArray) {
+	for (const [fileIndex, file] of fileArray.entries()) {
 		const fileType = getMediaTypeFromFile({ file });
 
 		if (!fileType) {
@@ -103,9 +105,9 @@ export async function processMediaAssets({
 			continue;
 		}
 
-		const storageCheck = await storageService.canStoreFile({
-			size: file.size,
-		});
+		const storageCheck = sourcePaths?.[fileIndex]
+			? { canStore: true, availableBytes: null }
+			: await storageService.canStoreFile({ size: file.size });
 
 		if (!storageCheck.canStore) {
 			toast.error(`Not enough browser storage for ${file.name}`, {
@@ -152,9 +154,7 @@ export async function processMediaAssets({
 					}
 				} catch (error) {
 					const message =
-						error instanceof Error
-							? error.message
-							: "Could not process video";
+						error instanceof Error ? error.message : "Could not process video";
 
 					toast.error(`Couldn't process ${file.name}`, {
 						description: message,
@@ -168,6 +168,7 @@ export async function processMediaAssets({
 				name: file.name,
 				type: fileType,
 				file,
+				sourcePath: sourcePaths?.[fileIndex],
 				url,
 				thumbnailUrl,
 				duration,
