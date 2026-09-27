@@ -175,6 +175,7 @@ export default function AutomationPage() {
 
 				<section className="min-w-0">
 					{error && <div className="mb-4 flex gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"><CircleAlert className="mt-0.5 size-4 shrink-0" />{error}</div>}
+					{activeJob && <ProcessingBar activeJob={activeJob} />}
 					{selectedTool === "auto-video" && <ToolCard title="Auto Video" description="Chọn thư mục video, random một nền, loop theo audio và xuất MP4." icon={<Clapperboard />}><form className="space-y-5" onSubmit={handleAutoVideo}><FileField inputRef={autoVideoAudioInput} name="audio" label="Audio chính" accept="audio/*" icon={<Music2 />} /><MultiMediaField inputRef={backgroundsInput} /><SelectField id="auto-resolution" name="resolution" label="Độ phân giải" options={[{ value: "1080p", label: "Full HD · 1920×1080" }, { value: "4k", label: "4K · 3840×2160" }]} /><p className="text-sm text-muted-foreground">Hệ thống tự bỏ qua file không phải video và chọn ngẫu nhiên một video hợp lệ trong thư mục.</p><SubmitButton busy={activeJob === "auto-video"} disabled={!status?.available || activeJob !== null} label="Render Auto Video" icon={<Clapperboard />} /></form></ToolCard>}
 					{selectedTool === "image-audio" && <ToolCard title="Ảnh + Audio → MP4" description="Tạo video từ một ảnh tĩnh và một bản audio." icon={<WandSparkles />}><form className="space-y-5" onSubmit={handleImageAudio}><div className="grid gap-4 sm:grid-cols-2"><FileField inputRef={imageInput} name="image" label="Ảnh nền" accept="image/jpeg,image/png,image/webp,image/bmp" icon={<ImageIcon />} /><FileField inputRef={audioInput} name="audio" label="Audio" accept="audio/*" icon={<Music2 />} /></div><SelectField id="resolution" name="resolution" label="Độ phân giải" options={[{ value: "1080p", label: "Full HD · 1920×1080" }, { value: "4k", label: "4K · 3840×2160" }]} /><p className="text-sm text-muted-foreground">Giữ đúng tỷ lệ ảnh và kết thúc theo độ dài audio.</p><SubmitButton busy={activeJob === "image-audio"} disabled={!status?.available || activeJob !== null} label="Bắt đầu render" icon={<WandSparkles />} /></form></ToolCard>}
 
@@ -205,6 +206,23 @@ function parseFfmpegStatus(value: unknown): FfmpegStatus {
 function EngineStatus({ status }: { status: FfmpegStatus | null }) {
 	if (!status) return <span className="text-xs text-muted-foreground">Đang kiểm tra FFmpeg…</span>;
 	return <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${status.available ? "border-green-500/30 bg-green-500/10 text-green-600" : "border-destructive/30 bg-destructive/10 text-destructive"}`}>{status.available ? <CheckCircle2 className="size-3.5" /> : <CircleAlert className="size-3.5" />} {status.available ? "FFmpeg sẵn sàng" : "FFmpeg chưa sẵn sàng"}</div>;
+}
+
+function ProcessingBar({ activeJob }: { activeJob: ToolId }) {
+	const [elapsedSeconds, setElapsedSeconds] = useState(0);
+	useEffect(() => {
+		const startedAt = Date.now();
+		const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+		return () => window.clearInterval(timer);
+	}, []);
+	const label = TOOLS.find((tool) => tool.id === activeJob)?.label ?? "FFmpeg";
+	return <div className="mb-4 overflow-hidden rounded-md border border-blue-500/30 bg-blue-500/5"><div className="flex items-center gap-3 px-4 py-3"><LoaderCircle className="size-5 animate-spin text-blue-500" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-3"><p className="truncate text-sm font-medium">Đang xử lý · {label}</p><span className="shrink-0 font-mono text-xs text-muted-foreground">{formatElapsedTime(elapsedSeconds)}</span></div><p className="mt-0.5 text-xs text-muted-foreground">Đang upload và xử lý bằng FFmpeg, vui lòng không đóng trang.</p></div></div><div className="h-1.5 overflow-hidden bg-blue-500/10"><div className="h-full w-full animate-pulse bg-blue-500" /></div></div>;
+}
+
+function formatElapsedTime(totalSeconds: number) {
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function FileField({ inputRef, name, label, accept, icon }: { inputRef: RefObject<HTMLInputElement | null>; name: string; label: string; accept: string; icon: ReactNode }) {
