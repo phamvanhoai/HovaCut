@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TransitionTopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -115,6 +115,26 @@ function ExportPopover({
 		DEFAULT_EXPORT_OPTIONS.includeAudio ?? true,
 	);
 	const [isNativeExporting, setIsNativeExporting] = useState(false);
+	const [nativeEncoders, setNativeEncoders] = useState<string[]>([]);
+	const [nativeEncoder, setNativeEncoder] = useState("cpu");
+
+	useEffect(() => {
+		if (!window.__TAURI__) return;
+		void window.__TAURI__.core
+			.invoke<string[]>("detect_video_encoders")
+			.then((encoders) => {
+				setNativeEncoders(encoders);
+				setNativeEncoder(
+					encoders.includes("nvidia")
+						? "nvidia"
+						: encoders.includes("intel")
+							? "intel"
+							: encoders.includes("amd")
+								? "amd"
+								: "cpu",
+				);
+			});
+	}, []);
 
 	const handleNativeExport = async () => {
 		if (!window.__TAURI__) return;
@@ -315,14 +335,6 @@ function ExportPopover({
 		if (!outputPath) return;
 		setIsNativeExporting(true);
 		try {
-			const encoders = await window.__TAURI__.core.invoke<string[]>(
-				"detect_video_encoders",
-			);
-			const encoder = encoders.includes("nvidia")
-				? "nvidia"
-				: encoders.includes("intel")
-					? "intel"
-					: "cpu";
 			const fpsValue =
 				activeProject.settings.fps.numerator /
 				activeProject.settings.fps.denominator;
@@ -335,7 +347,8 @@ function ExportPopover({
 				width: activeProject.settings.canvasSize.width,
 				height: activeProject.settings.canvasSize.height,
 				fps: fpsValue,
-				encoder,
+				encoder: nativeEncoder,
+				quality,
 			});
 			toast.success("Đã xuất video bằng FFmpeg/GPU", {
 				description: outputPath,
@@ -394,6 +407,30 @@ function ExportPopover({
 				<>
 					{typeof window !== "undefined" && window.__TAURI__ && !isExporting ? (
 						<div className="p-3 border-b">
+							<label
+								className="mb-2 block text-xs text-muted-foreground"
+								htmlFor="native-encoder"
+							>
+								GPU xuất video
+							</label>
+							<select
+								id="native-encoder"
+								className="mb-2 h-9 w-full rounded-md border bg-background px-2 text-sm"
+								value={nativeEncoder}
+								onChange={(event) => setNativeEncoder(event.target.value)}
+								disabled={isNativeExporting}
+							>
+								<option value="cpu">CPU · libx264</option>
+								{nativeEncoders.includes("nvidia") ? (
+									<option value="nvidia">NVIDIA · NVENC</option>
+								) : null}
+								{nativeEncoders.includes("intel") ? (
+									<option value="intel">Intel · Quick Sync</option>
+								) : null}
+								{nativeEncoders.includes("amd") ? (
+									<option value="amd">AMD · AMF</option>
+								) : null}
+							</select>
 							<Button
 								className="w-full"
 								onClick={handleNativeExport}

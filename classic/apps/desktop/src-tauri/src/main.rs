@@ -273,6 +273,7 @@ fn render_native_timeline(
     height: u32,
     fps: f64,
     encoder: String,
+    quality: String,
 ) -> Result<String, String> {
     if clips.is_empty()
         || clips
@@ -380,8 +381,29 @@ fn render_native_timeline(
     if !audios.is_empty() {
         command.args(["-map", "[outa]", "-c:a", "aac", "-b:a", "192k"]);
     }
+    command.args(["-c:v", video_encoder]);
+    let quality_value = match quality.as_str() {
+        "low" => "32",
+        "medium" => "26",
+        "very_high" => "18",
+        _ => "22",
+    };
+    match video_encoder {
+        "h264_nvenc" => {
+            command.args(["-preset", "p4", "-cq", quality_value]);
+        }
+        "h264_qsv" => {
+            command.args(["-preset", "medium", "-global_quality", quality_value]);
+        }
+        "h264_amf" => {
+            command.args(["-quality", "balanced", "-qp_i", quality_value, "-qp_p", quality_value]);
+        }
+        _ => {
+            command.args(["-preset", "medium", "-crf", quality_value]);
+        }
+    }
     let output = command
-        .args(["-c:v", video_encoder, "-preset", "fast", "-movflags", "+faststart", &output_path])
+        .args(["-movflags", "+faststart", &output_path])
         .output()
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
