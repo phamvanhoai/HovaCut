@@ -440,16 +440,13 @@ class StorageService {
 
 		if (!metadata) return null;
 		let file = storedFile;
+		let nativeUrl: string | undefined;
 		if (!file && metadata.sourcePath && typeof window !== "undefined") {
-			const url = (window as DesktopWindow).__TAURI__?.core.convertFileSrc?.(
+			nativeUrl = (window as DesktopWindow).__TAURI__?.core.convertFileSrc?.(
 				metadata.sourcePath,
 			);
-			if (url) {
-				const response = await fetch(url);
-				if (!response.ok)
-					throw new Error(`Không thể đọc media: ${metadata.name}`);
-				const blob = await response.blob();
-				file = new File([blob], metadata.name, {
+			if (nativeUrl) {
+				file = new File([], metadata.name, {
 					type:
 						metadata.mimeType || getMimeTypeFromName({ name: metadata.name }),
 					lastModified: metadata.lastModified,
@@ -459,7 +456,9 @@ class StorageService {
 		if (!file) return null;
 
 		let url: string;
-		if (metadata.type === "image" && (!file.type || file.type === "")) {
+		if (nativeUrl) {
+			url = nativeUrl;
+		} else if (metadata.type === "image" && (!file.type || file.type === "")) {
 			try {
 				const text = await file.text();
 				if (text.trim().startsWith("<svg")) {
