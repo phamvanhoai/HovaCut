@@ -99,13 +99,19 @@ fn import_project_json(input_path: String) -> Result<Value, String> {
     let content = fs::read(&input_path).map_err(|error| error.to_string())?;
     let mut project: Value = serde_json::from_slice(&content)
         .map_err(|error| format!("File project không phải JSON hợp lệ: {error}"))?;
-    if let Some(media) = project.get_mut("desktopMedia").and_then(Value::as_array_mut) {
-        let base = Path::new(&input_path).parent().unwrap_or_else(|| Path::new("."));
+    if let Some(media) = project
+        .get_mut("desktopMedia")
+        .and_then(Value::as_array_mut)
+    {
+        let base = Path::new(&input_path)
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
         for item in media {
             if let Some(relative) = item.get("sourcePath").and_then(Value::as_str) {
                 let path = PathBuf::from(relative);
                 if path.is_relative() {
-                    item["sourcePath"] = Value::String(base.join(path).to_string_lossy().into_owned());
+                    item["sourcePath"] =
+                        Value::String(base.join(path).to_string_lossy().into_owned());
                 }
             }
         }
@@ -118,7 +124,11 @@ fn import_project_json(input_path: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn export_project_json(project_id: String, output_path: String, media_assets: Vec<Value>) -> Result<String, String> {
+fn export_project_json(
+    project_id: String,
+    output_path: String,
+    media_assets: Vec<Value>,
+) -> Result<String, String> {
     let source = projects_directory()?.join(format!("{project_id}.hovacut.json"));
     if !source.is_file() {
         return Err("Không tìm thấy dữ liệu project đã lưu.".into());
@@ -126,17 +136,30 @@ fn export_project_json(project_id: String, output_path: String, media_assets: Ve
     let content = fs::read(source).map_err(|error| error.to_string())?;
     let mut project: Value = serde_json::from_slice(&content).map_err(|error| error.to_string())?;
     let output = PathBuf::from(&output_path);
-    let stem = output.file_stem().and_then(|value| value.to_str()).unwrap_or("hovacut");
+    let stem = output
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("hovacut");
     let media_folder_name = format!("{stem}_media");
-    let media_directory = output.parent().unwrap_or_else(|| Path::new(".")).join(&media_folder_name);
+    let media_directory = output
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(&media_folder_name);
     fs::create_dir_all(&media_directory).map_err(|error| error.to_string())?;
     let mut portable_media = Vec::new();
     for mut media in media_assets {
-        let Some(source_path) = media.get("sourcePath").and_then(Value::as_str) else { continue };
+        let Some(source_path) = media.get("sourcePath").and_then(Value::as_str) else {
+            continue;
+        };
         let source = PathBuf::from(source_path);
-        if !source.is_file() { continue; }
+        if !source.is_file() {
+            continue;
+        }
         let id = media.get("id").and_then(Value::as_str).unwrap_or("media");
-        let name = source.file_name().and_then(|value| value.to_str()).unwrap_or("asset");
+        let name = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("asset");
         let filename = format!("{id}-{name}");
         fs::copy(&source, media_directory.join(&filename)).map_err(|error| error.to_string())?;
         media["sourcePath"] = Value::String(format!("{media_folder_name}/{filename}"));
@@ -263,6 +286,11 @@ struct NativeTimelineText {
     opacity: f64,
     font_family: String,
     rotation: f64,
+    bold: bool,
+    italic: bool,
+    background_enabled: bool,
+    background_color: String,
+    background_padding: f64,
 }
 
 fn escape_drawtext(value: &str) -> String {
@@ -277,21 +305,42 @@ fn escape_drawtext(value: &str) -> String {
         .replace('\n', "\\n")
 }
 
-fn windows_font_path(family: &str) -> PathBuf {
-    let filename = match family.to_ascii_lowercase().as_str() {
-        "arial" => "arial.ttf",
-        "arial black" => "ariblk.ttf",
-        "calibri" => "calibri.ttf",
-        "cambria" => "cambria.ttc",
-        "comic sans ms" => "comic.ttf",
-        "consolas" => "consola.ttf",
-        "courier new" => "cour.ttf",
-        "georgia" => "georgia.ttf",
-        "segoe ui" => "segoeui.ttf",
-        "tahoma" => "tahoma.ttf",
-        "times new roman" => "times.ttf",
-        "trebuchet ms" => "trebuc.ttf",
-        "verdana" => "verdana.ttf",
+fn windows_font_path(family: &str, bold: bool, italic: bool) -> PathBuf {
+    let style = match (bold, italic) {
+        (true, true) => 3,
+        (true, false) => 1,
+        (false, true) => 2,
+        _ => 0,
+    };
+    let filename = match (family.to_ascii_lowercase().as_str(), style) {
+        ("arial", 1) => "arialbd.ttf",
+        ("arial", 2) => "ariali.ttf",
+        ("arial", 3) => "arialbi.ttf",
+        ("calibri", 1) => "calibrib.ttf",
+        ("calibri", 2) => "calibrii.ttf",
+        ("calibri", 3) => "calibriz.ttf",
+        ("segoe ui", 1) => "segoeuib.ttf",
+        ("segoe ui", 2) => "segoeuii.ttf",
+        ("segoe ui", 3) => "segoeuiz.ttf",
+        ("times new roman", 1) => "timesbd.ttf",
+        ("times new roman", 2) => "timesi.ttf",
+        ("times new roman", 3) => "timesbi.ttf",
+        ("arial", _) => "arial.ttf",
+        ("arial black", _) => "ariblk.ttf",
+        ("calibri", _) => "calibri.ttf",
+        ("cambria", _) => "cambria.ttc",
+        ("comic sans ms", _) => "comic.ttf",
+        ("consolas", _) => "consola.ttf",
+        ("courier new", _) => "cour.ttf",
+        ("georgia", _) => "georgia.ttf",
+        ("segoe ui", _) => "segoeui.ttf",
+        ("tahoma", _) => "tahoma.ttf",
+        ("times new roman", _) => "times.ttf",
+        ("trebuchet ms", _) => "trebuc.ttf",
+        ("verdana", _) => "verdana.ttf",
+        (_, 1) => "arialbd.ttf",
+        (_, 2) => "ariali.ttf",
+        (_, 3) => "arialbi.ttf",
         _ => "arial.ttf",
     };
     let selected = PathBuf::from(r"C:\Windows\Fonts").join(filename);
@@ -324,7 +373,9 @@ fn render_native_timeline(
         || clips
             .iter()
             .any(|clip| clip.kind != "blank" && !Path::new(&clip.path).is_file())
-        || overlays.iter().any(|overlay| !Path::new(&overlay.path).is_file())
+        || overlays
+            .iter()
+            .any(|overlay| !Path::new(&overlay.path).is_file())
         || audios.iter().any(|audio| !Path::new(&audio.path).is_file())
     {
         return Err("Timeline không có media native hợp lệ.".into());
@@ -364,9 +415,23 @@ fn render_native_timeline(
     }
     for overlay in &overlays {
         if overlay.kind == "image" {
-            command.args(["-loop", "1", "-t", &overlay.duration.to_string(), "-i", &overlay.path]);
+            command.args([
+                "-loop",
+                "1",
+                "-t",
+                &overlay.duration.to_string(),
+                "-i",
+                &overlay.path,
+            ]);
         } else {
-            command.args(["-ss", &overlay.trim_start.to_string(), "-t", &overlay.duration.to_string(), "-i", &overlay.path]);
+            command.args([
+                "-ss",
+                &overlay.trim_start.to_string(),
+                "-t",
+                &overlay.duration.to_string(),
+                "-i",
+                &overlay.path,
+            ]);
         }
     }
     for audio in &audios {
@@ -379,7 +444,11 @@ fn render_native_timeline(
         } else {
             String::new()
         };
-        let blur = if clip.blur > 0.0 { format!(",gblur=sigma={}", clip.blur.min(100.0)) } else { String::new() };
+        let blur = if clip.blur > 0.0 {
+            format!(",gblur=sigma={}", clip.blur.min(100.0))
+        } else {
+            String::new()
+        };
         filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background_color},fps={fps},setsar=1,format=yuv420p{blur}{setpts}[v{index}];"));
     }
     for index in 0..clips.len() {
@@ -389,11 +458,26 @@ fn render_native_timeline(
     let mut video_output = "outv".to_string();
     for (overlay_index, overlay) in overlays.iter().enumerate() {
         let input_index = clips.len() + overlay_index;
-        let overlay_width = ((overlay.source_width as f64) * overlay.scale_x.abs()).round().max(2.0) as u32;
-        let overlay_height = ((overlay.source_height as f64) * overlay.scale_y.abs()).round().max(2.0) as u32;
+        let overlay_width = ((overlay.source_width as f64) * overlay.scale_x.abs())
+            .round()
+            .max(2.0) as u32;
+        let overlay_height = ((overlay.source_height as f64) * overlay.scale_y.abs())
+            .round()
+            .max(2.0) as u32;
         let next_output = format!("outv{}", overlay_index + 1);
-        let rotation = if overlay.rotation.abs() > 0.001 { format!(",rotate={}/180*PI:ow=rotw({}/180*PI):oh=roth({}/180*PI):c=none", overlay.rotation, overlay.rotation, overlay.rotation) } else { String::new() };
-        let blur = if overlay.blur > 0.0 { format!(",gblur=sigma={}", overlay.blur.min(100.0)) } else { String::new() };
+        let rotation = if overlay.rotation.abs() > 0.001 {
+            format!(
+                ",rotate={}/180*PI:ow=rotw({}/180*PI):oh=roth({}/180*PI):c=none",
+                overlay.rotation, overlay.rotation, overlay.rotation
+            )
+        } else {
+            String::new()
+        };
+        let blur = if overlay.blur > 0.0 {
+            format!(",gblur=sigma={}", overlay.blur.min(100.0))
+        } else {
+            String::new()
+        };
         filter.push_str(&format!(";[{input_index}:v]scale={overlay_width}:{overlay_height},format=rgba{rotation}{blur},colorchannelmixer=aa={},setpts=PTS-STARTPTS+{}/TB[ov{overlay_index}];[{}][ov{overlay_index}]overlay=x=(W-w)/2+{}:y=(H-h)/2+{}:enable='between(t,{},{})'[{}]", overlay.opacity.clamp(0.0, 1.0), overlay.start, video_output, overlay.position_x, overlay.position_y, overlay.start, overlay.start + overlay.duration, next_output));
         video_output = next_output;
     }
@@ -401,9 +485,22 @@ fn render_native_timeline(
         let next_output = format!("outt{}", text_index + 1);
         let content = escape_drawtext(&text.content);
         let color = text.color.trim_start_matches('#');
-        let font_file = windows_font_path(&text.font_family).to_string_lossy().replace('\\', "/").replace(':', "\\:");
+        let font_file = windows_font_path(&text.font_family, text.bold, text.italic)
+            .to_string_lossy()
+            .replace('\\', "/")
+            .replace(':', "\\:");
         let _rotation = text.rotation;
-        filter.push_str(&format!(";[{}]drawtext=fontfile='{}':text='{}':fontsize={}:fontcolor=#{}@{}:x=(w-text_w)/2+{}:y=(h-text_h)/2+{}:enable='between(t,{},{})'[{}]", video_output, font_file, content, text.font_size.max(1.0), color, text.opacity.clamp(0.0, 1.0), text.position_x, text.position_y, text.start, text.start + text.duration, next_output));
+        let background = if text.background_enabled {
+            format!(
+                ":box=1:boxcolor={}@{}:boxborderw={}",
+                text.background_color,
+                text.opacity.clamp(0.0, 1.0),
+                text.background_padding.max(0.0)
+            )
+        } else {
+            String::new()
+        };
+        filter.push_str(&format!(";[{}]drawtext=fontfile='{}':text='{}':fontsize={}:fontcolor=#{}@{}{}:x=(w-text_w)/2+{}:y=(h-text_h)/2+{}:enable='between(t,{},{})'[{}]", video_output, font_file, content, text.font_size.max(1.0), color, text.opacity.clamp(0.0, 1.0), background, text.position_x, text.position_y, text.start, text.start + text.duration, next_output));
         video_output = next_output;
     }
     if !audios.is_empty() {
@@ -418,15 +515,31 @@ fn render_native_timeline(
         }
         filter.push_str(&format!("amix=inputs={}:normalize=0[outa]", audios.len()));
     }
-    let video_encoder = if format == "webm" { "libvpx-vp9" } else { match encoder.as_str() {
-        "nvidia" => "h264_nvenc",
-        "intel" => "h264_qsv",
-        "amd" => "h264_amf",
-        _ => "libx264",
-    }};
-    command.args(["-filter_complex", &filter, "-map", &format!("[{video_output}]")]);
+    let video_encoder = if format == "webm" {
+        "libvpx-vp9"
+    } else {
+        match encoder.as_str() {
+            "nvidia" => "h264_nvenc",
+            "intel" => "h264_qsv",
+            "amd" => "h264_amf",
+            _ => "libx264",
+        }
+    };
+    command.args([
+        "-filter_complex",
+        &filter,
+        "-map",
+        &format!("[{video_output}]"),
+    ]);
     if !audios.is_empty() {
-        command.args(["-map", "[outa]", "-c:a", if format == "webm" { "libopus" } else { "aac" }, "-b:a", "192k"]);
+        command.args([
+            "-map",
+            "[outa]",
+            "-c:a",
+            if format == "webm" { "libopus" } else { "aac" },
+            "-b:a",
+            "192k",
+        ]);
     }
     command.args(["-c:v", video_encoder]);
     let quality_value = match quality.as_str() {
@@ -446,7 +559,14 @@ fn render_native_timeline(
             command.args(["-preset", "medium", "-global_quality", quality_value]);
         }
         "h264_amf" => {
-            command.args(["-quality", "balanced", "-qp_i", quality_value, "-qp_p", quality_value]);
+            command.args([
+                "-quality",
+                "balanced",
+                "-qp_i",
+                quality_value,
+                "-qp_p",
+                quality_value,
+            ]);
         }
         _ => {
             command.args(["-preset", "medium", "-crf", quality_value]);
@@ -477,7 +597,8 @@ fn render_native_timeline(
             }
             if let Some(value) = line.strip_prefix("out_time_ms=") {
                 if let Ok(microseconds) = value.parse::<f64>() {
-                    let progress = (microseconds / 1_000_000.0 / total_duration.max(0.001)).clamp(0.0, 1.0);
+                    let progress =
+                        (microseconds / 1_000_000.0 / total_duration.max(0.001)).clamp(0.0, 1.0);
                     let _ = window.emit("native-export-progress", progress);
                 }
             }

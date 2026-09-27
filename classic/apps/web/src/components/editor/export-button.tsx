@@ -191,6 +191,8 @@ function ExportPopover({
 			const transform = buildTransformFromParams({ params: element.params });
 			return (
 				(element.type === "text" && transform.rotate !== 0) ||
+				(element.type === "text" &&
+					element.params.textDecoration === "underline") ||
 				Boolean(element.animations) ||
 				hasUnsupportedEffects(element) ||
 				("masks" in element && (element.masks?.length ?? 0) > 0) ||
@@ -224,6 +226,24 @@ function ExportPopover({
 					positionY: transform.position.y,
 					opacity: readOpacityFromParams({ params: element.params }),
 					rotation: transform.rotate,
+					bold:
+						element.params.fontWeight === "bold" ||
+						(typeof element.params.fontWeight === "number" &&
+							element.params.fontWeight >= 600),
+					italic: element.params.fontStyle === "italic",
+					backgroundEnabled: element.params["background.enabled"] === true,
+					backgroundColor:
+						typeof element.params["background.color"] === "string"
+							? element.params["background.color"]
+							: "#000000",
+					backgroundPadding: Math.max(
+						typeof element.params["background.paddingX"] === "number"
+							? element.params["background.paddingX"]
+							: 0,
+						typeof element.params["background.paddingY"] === "number"
+							? element.params["background.paddingY"]
+							: 0,
+					),
 					blur: getNativeBlur(element),
 				},
 			];
