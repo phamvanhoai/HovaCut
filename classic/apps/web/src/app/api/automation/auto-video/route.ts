@@ -5,14 +5,14 @@ import { getFfmpegStatus, runFfmpeg } from "@/automation/server/ffmpeg";
 import { fileResponse, MAX_MEDIA_BYTES, saveUpload, withJobDirectory } from "@/automation/server/job-files";
 
 export const runtime = "nodejs";
-const MAX_BACKGROUNDS = 30;
+const MAX_BACKGROUNDS = 200;
 
 export async function POST(request: Request) {
 	const status = await getFfmpegStatus();
 	if (!status.available) return NextResponse.json({ error: status.error }, { status: 503 });
 	const form = await request.formData();
 	const audio = form.get("audio");
-	const backgrounds = form.getAll("backgrounds").filter((value): value is File => value instanceof File);
+	const backgrounds = form.getAll("backgrounds").filter((value): value is File => value instanceof File && (value.type.startsWith("video/") || /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(value.name)));
 	if (!(audio instanceof File)) return NextResponse.json({ error: "Audio file is required." }, { status: 400 });
 	if (backgrounds.length === 0) return NextResponse.json({ error: "Select at least one background video." }, { status: 400 });
 	if (backgrounds.length > MAX_BACKGROUNDS) return NextResponse.json({ error: `A maximum of ${MAX_BACKGROUNDS} backgrounds is allowed.` }, { status: 400 });
