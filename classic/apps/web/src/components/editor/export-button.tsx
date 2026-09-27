@@ -162,6 +162,21 @@ function ExportPopover({
 		const assets = new Map(
 			editor.media.getAssets().map((asset) => [asset.id, asset]),
 		);
+		const getNativeBlur = (element: TimelineElement) => {
+			if (!("effects" in element)) return 0;
+			const blur = element.effects?.find(
+				(effect) => effect.enabled && effect.type === "blur",
+			);
+			const intensity = blur?.params.intensity;
+			return typeof intensity === "number" ? intensity / 5 : 0;
+		};
+		const hasUnsupportedEffects = (element: TimelineElement) =>
+			"effects" in element &&
+			(element.effects?.some(
+				(effect) =>
+					effect.enabled && (effect.type !== "blur" || element.type === "text"),
+			) ??
+				false);
 		const overlayElements = scene.tracks.overlay.reduce<TimelineElement[]>(
 			(all, track) => [...all, ...track.elements],
 			[],
@@ -177,7 +192,7 @@ function ExportPopover({
 			return (
 				(element.type === "text" && transform.rotate !== 0) ||
 				Boolean(element.animations) ||
-				(element.effects?.length ?? 0) > 0 ||
+				hasUnsupportedEffects(element) ||
 				("masks" in element && (element.masks?.length ?? 0) > 0) ||
 				(typeof element.params.blendMode === "string" &&
 					element.params.blendMode !== "normal")
@@ -209,6 +224,7 @@ function ExportPopover({
 					positionY: transform.position.y,
 					opacity: readOpacityFromParams({ params: element.params }),
 					rotation: transform.rotate,
+					blur: getNativeBlur(element),
 				},
 			];
 		});
@@ -217,6 +233,14 @@ function ExportPopover({
 		).length;
 		if (overlays.length !== mediaOverlayCount) {
 			toast.error("Một số overlay không còn file gốc hoặc thiếu kích thước.");
+			return;
+		}
+		if (
+			scene.tracks.main.elements.some((element) =>
+				hasUnsupportedEffects(element),
+			)
+		) {
+			toast.error("Main timeline có effect chưa hỗ trợ Native GPU.");
 			return;
 		}
 		const texts = overlayElements.flatMap((element) => {
@@ -260,6 +284,7 @@ function ExportPopover({
 					duration: element.duration / TICKS_PER_SECOND,
 					trimStart: element.trimStart / TICKS_PER_SECOND,
 					rate: element.type === "video" ? (element.retime?.rate ?? 1) : 1,
+					blur: getNativeBlur(element),
 				},
 			];
 		});
@@ -269,6 +294,7 @@ function ExportPopover({
 			duration: number;
 			trimStart: number;
 			rate: number;
+			blur: number;
 		}> = [];
 		let cursor = 0;
 		for (const element of [...scene.tracks.main.elements].sort(
@@ -289,6 +315,7 @@ function ExportPopover({
 					duration: start - cursor,
 					trimStart: 0,
 					rate: 1,
+					blur: 0,
 				});
 			clips.push({
 				path: asset.sourcePath,
@@ -296,6 +323,7 @@ function ExportPopover({
 				duration: element.duration / TICKS_PER_SECOND,
 				trimStart: element.trimStart / TICKS_PER_SECOND,
 				rate: element.type === "video" ? (element.retime?.rate ?? 1) : 1,
+				blur: getNativeBlur(element),
 			});
 			cursor = Math.max(cursor, start + element.duration / TICKS_PER_SECOND);
 		}

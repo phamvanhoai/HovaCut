@@ -218,6 +218,7 @@ struct NativeTimelineClip {
     duration: f64,
     trim_start: f64,
     rate: f64,
+    blur: f64,
 }
 
 #[derive(Deserialize)]
@@ -246,6 +247,7 @@ struct NativeTimelineOverlay {
     position_y: f64,
     opacity: f64,
     rotation: f64,
+    blur: f64,
 }
 
 #[derive(Deserialize)]
@@ -377,7 +379,8 @@ fn render_native_timeline(
         } else {
             String::new()
         };
-        filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background_color},fps={fps},setsar=1,format=yuv420p{setpts}[v{index}];"));
+        let blur = if clip.blur > 0.0 { format!(",gblur=sigma={}", clip.blur.min(100.0)) } else { String::new() };
+        filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background_color},fps={fps},setsar=1,format=yuv420p{blur}{setpts}[v{index}];"));
     }
     for index in 0..clips.len() {
         filter.push_str(&format!("[v{index}]"));
@@ -390,7 +393,8 @@ fn render_native_timeline(
         let overlay_height = ((overlay.source_height as f64) * overlay.scale_y.abs()).round().max(2.0) as u32;
         let next_output = format!("outv{}", overlay_index + 1);
         let rotation = if overlay.rotation.abs() > 0.001 { format!(",rotate={}/180*PI:ow=rotw({}/180*PI):oh=roth({}/180*PI):c=none", overlay.rotation, overlay.rotation, overlay.rotation) } else { String::new() };
-        filter.push_str(&format!(";[{input_index}:v]scale={overlay_width}:{overlay_height},format=rgba{rotation},colorchannelmixer=aa={},setpts=PTS-STARTPTS+{}/TB[ov{overlay_index}];[{}][ov{overlay_index}]overlay=x=(W-w)/2+{}:y=(H-h)/2+{}:enable='between(t,{},{})'[{}]", overlay.opacity.clamp(0.0, 1.0), overlay.start, video_output, overlay.position_x, overlay.position_y, overlay.start, overlay.start + overlay.duration, next_output));
+        let blur = if overlay.blur > 0.0 { format!(",gblur=sigma={}", overlay.blur.min(100.0)) } else { String::new() };
+        filter.push_str(&format!(";[{input_index}:v]scale={overlay_width}:{overlay_height},format=rgba{rotation}{blur},colorchannelmixer=aa={},setpts=PTS-STARTPTS+{}/TB[ov{overlay_index}];[{}][ov{overlay_index}]overlay=x=(W-w)/2+{}:y=(H-h)/2+{}:enable='between(t,{},{})'[{}]", overlay.opacity.clamp(0.0, 1.0), overlay.start, video_output, overlay.position_x, overlay.position_y, overlay.start, overlay.start + overlay.duration, next_output));
         video_output = next_output;
     }
     for (text_index, text) in texts.iter().enumerate() {
