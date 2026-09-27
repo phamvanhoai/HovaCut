@@ -36,6 +36,8 @@ import { useEditor } from "@/editor/use-editor";
 import { DEFAULT_EXPORT_OPTIONS } from "@/export/defaults";
 import { TICKS_PER_SECOND } from "@/wasm";
 import { toast } from "sonner";
+import { buildTransformFromParams, readOpacityFromParams } from "@/rendering";
+import type { TimelineElement } from "@/timeline";
 
 function isExportFormat(value: string): value is ExportFormat {
 	return EXPORT_FORMAT_VALUES.some((formatValue) => formatValue === value);
@@ -120,8 +122,52 @@ function ExportPopover({
 		const assets = new Map(
 			editor.media.getAssets().map((asset) => [asset.id, asset]),
 		);
-		if (scene.tracks.overlay.some((track) => track.elements.length > 0)) {
-			toast.error("Native GPU hiện chưa hỗ trợ overlay/chữ/hiệu ứng.");
+		const overlayElements = scene.tracks.overlay.reduce<TimelineElement[]>(
+			(all, track) => [...all, ...track.elements],
+			[],
+		);
+		const hasUnsupportedOverlay = overlayElements.some((element) => {
+			if (element.type !== "video" && element.type !== "image") return true;
+			const transform = buildTransformFromParams({ params: element.params });
+			return (
+				transform.rotate !== 0 ||
+				Boolean(element.animations) ||
+				(element.effects?.length ?? 0) > 0 ||
+				(element.masks?.length ?? 0) > 0 ||
+				(typeof element.params.blendMode === "string" &&
+					element.params.blendMode !== "normal")
+			);
+		});
+		if (hasUnsupportedOverlay) {
+			toast.error(
+				"Overlay có rotation, animation, mask hoặc effect chưa hỗ trợ Native GPU.",
+			);
+			return;
+		}
+		const overlays = overlayElements.flatMap((element) => {
+			if (element.type !== "video" && element.type !== "image") return [];
+			const asset = assets.get(element.mediaId);
+			if (!asset?.sourcePath || !asset.width || !asset.height) return [];
+			const transform = buildTransformFromParams({ params: element.params });
+			return [
+				{
+					path: asset.sourcePath,
+					kind: element.type,
+					start: element.startTime / TICKS_PER_SECOND,
+					duration: element.duration / TICKS_PER_SECOND,
+					trimStart: element.trimStart / TICKS_PER_SECOND,
+					sourceWidth: asset.width,
+					sourceHeight: asset.height,
+					scaleX: transform.scaleX,
+					scaleY: transform.scaleY,
+					positionX: transform.position.x,
+					positionY: transform.position.y,
+					opacity: readOpacityFromParams({ params: element.params }),
+				},
+			];
+		});
+		if (overlays.length !== overlayElements.length) {
+			toast.error("Một số overlay không còn file gốc hoặc thiếu kích thước.");
 			return;
 		}
 		const sourceClips = scene.tracks.main.elements.flatMap((element) => {
@@ -243,6 +289,7 @@ function ExportPopover({
 				activeProject.settings.fps.denominator;
 			await window.__TAURI__.core.invoke("render_native_timeline", {
 				clips,
+				overlays,
 				audios,
 				outputPath,
 				width: activeProject.settings.canvasSize.width,

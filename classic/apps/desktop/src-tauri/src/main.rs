@@ -192,9 +192,27 @@ struct NativeTimelineAudio {
     volume: f64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeTimelineOverlay {
+    path: String,
+    kind: String,
+    start: f64,
+    duration: f64,
+    trim_start: f64,
+    source_width: u32,
+    source_height: u32,
+    scale_x: f64,
+    scale_y: f64,
+    position_x: f64,
+    position_y: f64,
+    opacity: f64,
+}
+
 #[tauri::command]
 fn render_native_timeline(
     clips: Vec<NativeTimelineClip>,
+    overlays: Vec<NativeTimelineOverlay>,
     audios: Vec<NativeTimelineAudio>,
     output_path: String,
     width: u32,
@@ -206,6 +224,8 @@ fn render_native_timeline(
         || clips
             .iter()
             .any(|clip| clip.kind != "blank" && !Path::new(&clip.path).is_file())
+        || overlays.iter().any(|overlay| !Path::new(&overlay.path).is_file())
+        || audios.iter().any(|audio| !Path::new(&audio.path).is_file())
     {
         return Err("Timeline không có media native hợp lệ.".into());
     }
@@ -242,6 +262,13 @@ fn render_native_timeline(
             ]);
         }
     }
+    for overlay in &overlays {
+        if overlay.kind == "image" {
+            command.args(["-loop", "1", "-t", &overlay.duration.to_string(), "-i", &overlay.path]);
+        } else {
+            command.args(["-ss", &overlay.trim_start.to_string(), "-t", &overlay.duration.to_string(), "-i", &overlay.path]);
+        }
+    }
     for audio in &audios {
         command.args(["-i", &audio.path]);
     }
@@ -258,10 +285,19 @@ fn render_native_timeline(
         filter.push_str(&format!("[v{index}]"));
     }
     filter.push_str(&format!("concat=n={}:v=1:a=0[outv]", clips.len()));
+    let mut video_output = "outv".to_string();
+    for (overlay_index, overlay) in overlays.iter().enumerate() {
+        let input_index = clips.len() + overlay_index;
+        let overlay_width = ((overlay.source_width as f64) * overlay.scale_x.abs()).round().max(2.0) as u32;
+        let overlay_height = ((overlay.source_height as f64) * overlay.scale_y.abs()).round().max(2.0) as u32;
+        let next_output = format!("outv{}", overlay_index + 1);
+        filter.push_str(&format!(";[{input_index}:v]scale={overlay_width}:{overlay_height},format=rgba,colorchannelmixer=aa={},setpts=PTS-STARTPTS+{}/TB[ov{overlay_index}];[{}][ov{overlay_index}]overlay=x=(W-w)/2+{}:y=(H-h)/2+{}:enable='between(t,{},{})'[{}]", overlay.opacity.clamp(0.0, 1.0), overlay.start, video_output, overlay.position_x, overlay.position_y, overlay.start, overlay.start + overlay.duration, next_output));
+        video_output = next_output;
+    }
     if !audios.is_empty() {
         filter.push(';');
         for (audio_index, audio) in audios.iter().enumerate() {
-            let input_index = clips.len() + audio_index;
+            let input_index = clips.len() + overlays.len() + audio_index;
             let delay = (audio.start.max(0.0) * 1000.0).round() as u64;
             filter.push_str(&format!("[{input_index}:a]atrim=start={}:duration={},asetpts=PTS-STARTPTS,adelay={delay}|{delay},volume={}[a{audio_index}];", audio.trim_start, audio.duration, audio.volume));
         }
@@ -276,7 +312,7 @@ fn render_native_timeline(
         "amd" => "h264_amf",
         _ => "libx264",
     };
-    command.args(["-filter_complex", &filter, "-map", "[outv]"]);
+    command.args(["-filter_complex", &filter, "-map", &format!("[{video_output}]")]);
     if !audios.is_empty() {
         command.args(["-map", "[outa]", "-c:a", "aac", "-b:a", "192k"]);
     }
