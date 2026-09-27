@@ -9,10 +9,11 @@ import { Label } from "@/components/ui/label";
 import type { FfmpegStatus } from "@/automation/types";
 
 type CompletedJob = { id: string; filename: string; url: string; createdAt: Date };
-type ToolId = "auto-video" | "image-audio" | "convert" | "join-audio";
+type ToolId = "auto-video" | "auto-mp3" | "image-audio" | "convert" | "join-audio";
 
 const TOOLS = [
 	{ id: "auto-video" as const, label: "Auto Video", description: "Random từ thư mục", icon: Clapperboard },
+	{ id: "auto-mp3" as const, label: "Auto MP3", description: "Tạo playlist hàng loạt", icon: Music2 },
 	{ id: "image-audio" as const, label: "Ảnh + Audio", description: "Tạo video MP4", icon: ImageIcon },
 	{ id: "convert" as const, label: "Convert Media", description: "Đổi định dạng", icon: FileCog },
 	{ id: "join-audio" as const, label: "Ghép / Random MP3", description: "Tạo playlist", icon: ListMusic },
@@ -27,6 +28,9 @@ export default function AutomationPage() {
 	const [joinAudioFiles, setJoinAudioFiles] = useState<File[]>([]);
 	const [pinnedAudioFiles, setPinnedAudioFiles] = useState<File[]>([]);
 	const [audioDurations, setAudioDurations] = useState<Record<string, number>>({});
+	const [autoGoodFiles, setAutoGoodFiles] = useState<File[]>([]);
+	const [autoOtherFiles, setAutoOtherFiles] = useState<File[]>([]);
+	const [autoMp3Progress, setAutoMp3Progress] = useState<{ current: number; total: number } | null>(null);
 	const objectUrls = useRef<string[]>([]);
 	const imageInput = useRef<HTMLInputElement>(null);
 	const audioInput = useRef<HTMLInputElement>(null);
@@ -34,6 +38,8 @@ export default function AutomationPage() {
 	const joinAudioInput = useRef<HTMLInputElement>(null);
 	const autoVideoAudioInput = useRef<HTMLInputElement>(null);
 	const backgroundsInput = useRef<HTMLInputElement>(null);
+	const autoGoodInput = useRef<HTMLInputElement>(null);
+	const autoOtherInput = useRef<HTMLInputElement>(null);
 
 	useEffect(() => {
 		fetch("/api/automation/ffmpeg/status", { cache: "no-store" })
@@ -162,6 +168,44 @@ export default function AutomationPage() {
 		setPinnedAudioFiles((current) => [file, ...current.filter((item) => item !== file)]);
 		setJoinAudioFiles((current) => [file, ...current.filter((item) => item !== file)]);
 	};
+	const handleAutoMp3 = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		const form = new FormData(event.currentTarget);
+		const goodCount = Math.max(0, Math.floor(Number(form.get("goodCount"))));
+		const otherCount = Math.max(0, Math.floor(Number(form.get("otherCount"))));
+		const outputCount = Math.max(1, Math.min(20, Math.floor(Number(form.get("outputCount")))));
+		if (goodCount + otherCount < 2) return setError("Mỗi playlist cần ít nhất 2 bài.");
+		if (goodCount > autoGoodFiles.length || otherCount > autoOtherFiles.length) return setError("Số bài yêu cầu lớn hơn số file có trong thư mục.");
+		setError(null);
+		setActiveJob("auto-mp3");
+		try {
+			for (let index = 0; index < outputCount; index++) {
+				setAutoMp3Progress({ current: index + 1, total: outputCount });
+				const selected = shuffleFiles([...pickRandomFiles(autoGoodFiles, goodCount), ...pickRandomFiles(autoOtherFiles, otherCount)]);
+				const data = new FormData();
+				for (const file of selected) data.append("files", file, file.name);
+				data.set("random", "false");
+				data.set("pinnedCount", "0");
+				const response = await fetch("/api/automation/join-audio", { method: "POST", body: data });
+				if (!response.ok) {
+					const body: unknown = await response.json().catch(() => null);
+					const message = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string" ? body.error : `Tạo playlist ${index + 1} thất bại.`;
+					throw new Error(message);
+				}
+				const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+				const sequence = String(index + 1).padStart(2, "0");
+				addCompletedJob({ blob: await response.blob(), filename: `hovacut-auto-mp3-${sequence}-${timestamp}.mp3` });
+				const durationEntries = await Promise.all(selected.map(async (file) => [audioFileKey(file), await readAudioDuration(file)] as const));
+				const tracks = createCgtTracksList({ files: selected, durations: Object.fromEntries(durationEntries) });
+				addCompletedJob({ blob: new Blob([tracks], { type: "text/plain;charset=utf-8" }), filename: `hovacut-auto-mp3-${sequence}-${timestamp}.txt` });
+			}
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : "Tạo Auto MP3 thất bại.");
+		} finally {
+			setActiveJob(null);
+			setAutoMp3Progress(null);
+		}
+	};
 	const handleAutoVideo = (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (!autoVideoAudioInput.current?.files?.[0] || !(backgroundsInput.current?.files?.length)) return setError("Chọn audio và ít nhất một video nền.");
@@ -186,7 +230,8 @@ export default function AutomationPage() {
 
 				<section className="min-w-0">
 					{error && <div className="mb-4 flex gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"><CircleAlert className="mt-0.5 size-4 shrink-0" />{error}</div>}
-					{activeJob && <ProcessingBar activeJob={activeJob} />}
+					{activeJob && <ProcessingBar activeJob={activeJob} detail={activeJob === "auto-mp3" && autoMp3Progress ? `Playlist ${autoMp3Progress.current}/${autoMp3Progress.total}` : undefined} />}
+					{selectedTool === "auto-mp3" && <ToolCard title="Auto MP3" description="Random nhạc từ hai thư mục và tạo nhiều playlist MP3 kèm Tracks List." icon={<Music2 />}><form className="space-y-5" onSubmit={handleAutoMp3}><div className="grid gap-4 sm:grid-cols-2"><AudioFolderField inputRef={autoGoodInput} label="Thư mục Nhạc hay" files={autoGoodFiles} onFilesChange={setAutoGoodFiles} /><AudioFolderField inputRef={autoOtherInput} label="Thư mục Nhạc khác" files={autoOtherFiles} onFilesChange={setAutoOtherFiles} /></div><div className="grid gap-4 sm:grid-cols-3"><NumberField name="goodCount" label="Số bài Nhạc hay" value={3} min={0} max={50} /><NumberField name="otherCount" label="Số bài Nhạc khác" value={2} min={0} max={50} /><NumberField name="outputCount" label="Số playlist xuất" value={1} min={1} max={20} /></div><p className="text-sm text-muted-foreground">Mỗi playlist được random độc lập, không lặp bài trong cùng playlist và tự xuất kèm Tracks List TXT.</p><SubmitButton busy={activeJob === "auto-mp3"} disabled={!status?.available || activeJob !== null || autoGoodFiles.length + autoOtherFiles.length < 2} label="Tạo Auto MP3" icon={<Music2 />} /></form></ToolCard>}
 					{selectedTool === "auto-video" && <ToolCard title="Auto Video" description="Chọn thư mục video, random một nền, loop theo audio và xuất MP4." icon={<Clapperboard />}><form className="space-y-5" onSubmit={handleAutoVideo}><FileField inputRef={autoVideoAudioInput} name="audio" label="Audio chính" accept="audio/*" icon={<Music2 />} /><MultiMediaField inputRef={backgroundsInput} /><SelectField id="auto-resolution" name="resolution" label="Độ phân giải" options={[{ value: "1080p", label: "Full HD · 1920×1080" }, { value: "4k", label: "4K · 3840×2160" }]} /><p className="text-sm text-muted-foreground">Hệ thống tự bỏ qua file không phải video và chọn ngẫu nhiên một video hợp lệ trong thư mục.</p><SubmitButton busy={activeJob === "auto-video"} disabled={!status?.available || activeJob !== null} label="Render Auto Video" icon={<Clapperboard />} /></form></ToolCard>}
 					{selectedTool === "image-audio" && <ToolCard title="Ảnh + Audio → MP4" description="Tạo video từ một ảnh tĩnh và một bản audio." icon={<WandSparkles />}><form className="space-y-5" onSubmit={handleImageAudio}><div className="grid gap-4 sm:grid-cols-2"><FileField inputRef={imageInput} name="image" label="Ảnh nền" accept="image/jpeg,image/png,image/webp,image/bmp" icon={<ImageIcon />} /><FileField inputRef={audioInput} name="audio" label="Audio" accept="audio/*" icon={<Music2 />} /></div><SelectField id="resolution" name="resolution" label="Độ phân giải" options={[{ value: "1080p", label: "Full HD · 1920×1080" }, { value: "4k", label: "4K · 3840×2160" }]} /><p className="text-sm text-muted-foreground">Giữ đúng tỷ lệ ảnh và kết thúc theo độ dài audio.</p><SubmitButton busy={activeJob === "image-audio"} disabled={!status?.available || activeJob !== null} label="Bắt đầu render" icon={<WandSparkles />} /></form></ToolCard>}
 
@@ -219,7 +264,7 @@ function EngineStatus({ status }: { status: FfmpegStatus | null }) {
 	return <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${status.available ? "border-green-500/30 bg-green-500/10 text-green-600" : "border-destructive/30 bg-destructive/10 text-destructive"}`}>{status.available ? <CheckCircle2 className="size-3.5" /> : <CircleAlert className="size-3.5" />} {status.available ? "FFmpeg sẵn sàng" : "FFmpeg chưa sẵn sàng"}</div>;
 }
 
-function ProcessingBar({ activeJob }: { activeJob: ToolId }) {
+function ProcessingBar({ activeJob, detail }: { activeJob: ToolId; detail?: string }) {
 	const [elapsedSeconds, setElapsedSeconds] = useState(0);
 	useEffect(() => {
 		const startedAt = Date.now();
@@ -227,7 +272,7 @@ function ProcessingBar({ activeJob }: { activeJob: ToolId }) {
 		return () => window.clearInterval(timer);
 	}, []);
 	const label = TOOLS.find((tool) => tool.id === activeJob)?.label ?? "FFmpeg";
-	return <div className="mb-4 overflow-hidden rounded-md border border-blue-500/30 bg-blue-500/5"><div className="flex items-center gap-3 px-4 py-3"><LoaderCircle className="size-5 animate-spin text-blue-500" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-3"><p className="truncate text-sm font-medium">Đang xử lý · {label}</p><span className="shrink-0 font-mono text-xs text-muted-foreground">{formatElapsedTime(elapsedSeconds)}</span></div><p className="mt-0.5 text-xs text-muted-foreground">Đang upload và xử lý bằng FFmpeg, vui lòng không đóng trang.</p></div></div><div className="h-1.5 overflow-hidden bg-blue-500/10"><div className="h-full w-full animate-pulse bg-blue-500" /></div></div>;
+	return <div className="mb-4 overflow-hidden rounded-md border border-blue-500/30 bg-blue-500/5"><div className="flex items-center gap-3 px-4 py-3"><LoaderCircle className="size-5 animate-spin text-blue-500" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-3"><p className="truncate text-sm font-medium">Đang xử lý · {label}{detail ? ` · ${detail}` : ""}</p><span className="shrink-0 font-mono text-xs text-muted-foreground">{formatElapsedTime(elapsedSeconds)}</span></div><p className="mt-0.5 text-xs text-muted-foreground">Đang upload và xử lý bằng FFmpeg, vui lòng không đóng trang.</p></div></div><div className="h-1.5 overflow-hidden bg-blue-500/10"><div className="h-full w-full animate-pulse bg-blue-500" /></div></div>;
 }
 
 function formatElapsedTime(totalSeconds: number) {
@@ -260,6 +305,19 @@ function audioFileKey(file: File) {
 	return `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
 }
 
+function pickRandomFiles(files: File[], count: number) {
+	return shuffleFiles(files).slice(0, count);
+}
+
+function shuffleFiles(files: File[]) {
+	const result = [...files];
+	for (let index = result.length - 1; index > 0; index--) {
+		const target = Math.floor(Math.random() * (index + 1));
+		[result[index], result[target]] = [result[target], result[index]];
+	}
+	return result;
+}
+
 function PlaylistEditor({ files, pinnedFiles, durations, onMove, onMoveTop, onTogglePin, onRemove, onClear, onShuffle }: { files: File[]; pinnedFiles: File[]; durations: Record<string, number>; onMove: (options: { index: number; direction: -1 | 1 }) => void; onMoveTop: (index: number) => void; onTogglePin: (file: File) => void; onRemove: (index: number) => void; onClear: () => void; onShuffle: () => void }) {
 	const loaded = files.every((file) => durations[audioFileKey(file)] !== undefined);
 	const totalSeconds = files.reduce((total, file) => total + (durations[audioFileKey(file)] ?? 0), 0);
@@ -289,11 +347,16 @@ function readAudioDuration(file: File) {
 	return new Promise<number>((resolve) => {
 		const url = URL.createObjectURL(file);
 		const audio = document.createElement("audio");
+		let settled = false;
 		const finish = (duration: number) => {
+			if (settled) return;
+			settled = true;
+			window.clearTimeout(timeout);
 			URL.revokeObjectURL(url);
 			audio.removeAttribute("src");
 			resolve(Number.isFinite(duration) ? duration : 0);
 		};
+		const timeout = window.setTimeout(() => finish(0), 10000);
 		audio.preload = "metadata";
 		audio.onloadedmetadata = () => finish(audio.duration);
 		audio.onerror = () => finish(0);
@@ -317,12 +380,28 @@ function MultiMediaField({ inputRef }: { inputRef: RefObject<HTMLInputElement | 
 	return <label className={`flex min-h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-md border border-dashed p-6 text-center transition hover:bg-accent ${summary ? "border-foreground/40 bg-accent/30" : ""}`}><Clapperboard className="size-7 text-muted-foreground" /><span className="text-sm font-medium">Chọn thư mục video nền</span><span className="max-w-full truncate text-xs text-muted-foreground">{summary || "Quét tối đa 200 video trong thư mục"}</span><input ref={inputRef} className="sr-only" type="file" name="backgrounds" accept="video/*" multiple required onChange={(event) => { const files = Array.from(event.target.files ?? []).filter((file) => file.type.startsWith("video/") || /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(file.name)); const folder = files[0]?.webkitRelativePath.split("/")[0]; setSummary(files.length ? `${folder ? `${folder} · ` : ""}${files.length} video hợp lệ` : "Không tìm thấy video hợp lệ"); }} /></label>;
 }
 
+function AudioFolderField({ inputRef, label, files, onFilesChange }: { inputRef: RefObject<HTMLInputElement | null>; label: string; files: File[]; onFilesChange: (files: File[]) => void }) {
+	useEffect(() => {
+		inputRef.current?.setAttribute("webkitdirectory", "");
+		inputRef.current?.setAttribute("directory", "");
+	}, [inputRef]);
+	return <label className={`flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed p-5 text-center transition hover:bg-accent ${files.length ? "border-foreground/40 bg-accent/30" : ""}`}><Music2 className="size-6 text-muted-foreground" /><span className="text-sm font-medium">{label}</span><span className="text-xs text-muted-foreground">{files.length ? `${files.length} file audio` : "Nhấn để chọn thư mục"}</span><input ref={inputRef} className="sr-only" type="file" accept="audio/*" multiple onChange={(event) => onFilesChange(Array.from(event.target.files ?? []).filter(isAudioFile).slice(0, 200))} /></label>;
+}
+
+function isAudioFile(file: File) {
+	return file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac|opus|wma)$/i.test(file.name);
+}
+
 function ToolCard({ title, description, icon, children }: { title: string; description: string; icon: ReactNode; children: ReactNode }) {
 	return <Card><CardHeader className="border-b"><div className="flex items-start gap-3"><div className="rounded-md bg-accent p-2 [&_svg]:size-5">{icon}</div><div><CardTitle>{title}</CardTitle><p className="mt-1 text-sm text-muted-foreground">{description}</p></div></div></CardHeader><CardContent className="pt-6">{children}</CardContent></Card>;
 }
 
 function SelectField({ id, name, label, options }: { id: string; name: string; label: string; options: Array<{ value: string; label: string }> }) {
 	return <div className="space-y-2"><Label htmlFor={id}>{label}</Label><select id={id} name={name} className="h-10 w-full rounded-md border bg-background px-3 text-sm">{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>;
+}
+
+function NumberField({ name, label, value, min, max }: { name: string; label: string; value: number; min: number; max: number }) {
+	return <div className="space-y-2"><Label htmlFor={name}>{label}</Label><input id={name} name={name} type="number" defaultValue={value} min={min} max={max} required className="h-10 w-full rounded-md border bg-background px-3 text-sm" /></div>;
 }
 
 function SubmitButton({ busy, disabled, label, icon }: { busy: boolean; disabled: boolean; label: string; icon: ReactNode }) {
