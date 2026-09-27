@@ -314,6 +314,8 @@ fn render_native_timeline(
     encoder: String,
     quality: String,
     total_duration: f64,
+    format: String,
+    background_color: String,
 ) -> Result<String, String> {
     CANCEL_NATIVE_RENDER.store(false, Ordering::SeqCst);
     if clips.is_empty()
@@ -335,7 +337,7 @@ fn render_native_timeline(
                 "-t",
                 &clip.duration.to_string(),
                 "-i",
-                &format!("color=c=black:s={width}x{height}:r={fps}"),
+                &format!("color=c={background_color}:s={width}x{height}:r={fps}"),
             ]);
         } else if clip.kind == "image" {
             command.args([
@@ -375,7 +377,7 @@ fn render_native_timeline(
         } else {
             String::new()
         };
-        filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1,format=yuv420p{setpts}[v{index}];"));
+        filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background_color},fps={fps},setsar=1,format=yuv420p{setpts}[v{index}];"));
     }
     for index in 0..clips.len() {
         filter.push_str(&format!("[v{index}]"));
@@ -412,15 +414,15 @@ fn render_native_timeline(
         }
         filter.push_str(&format!("amix=inputs={}:normalize=0[outa]", audios.len()));
     }
-    let video_encoder = match encoder.as_str() {
+    let video_encoder = if format == "webm" { "libvpx-vp9" } else { match encoder.as_str() {
         "nvidia" => "h264_nvenc",
         "intel" => "h264_qsv",
         "amd" => "h264_amf",
         _ => "libx264",
-    };
+    }};
     command.args(["-filter_complex", &filter, "-map", &format!("[{video_output}]")]);
     if !audios.is_empty() {
-        command.args(["-map", "[outa]", "-c:a", "aac", "-b:a", "192k"]);
+        command.args(["-map", "[outa]", "-c:a", if format == "webm" { "libopus" } else { "aac" }, "-b:a", "192k"]);
     }
     command.args(["-c:v", video_encoder]);
     let quality_value = match quality.as_str() {
@@ -430,6 +432,9 @@ fn render_native_timeline(
         _ => "22",
     };
     match video_encoder {
+        "libvpx-vp9" => {
+            command.args(["-crf", quality_value, "-b:v", "0", "-row-mt", "1"]);
+        }
         "h264_nvenc" => {
             command.args(["-preset", "p4", "-cq", quality_value]);
         }
@@ -443,7 +448,10 @@ fn render_native_timeline(
             command.args(["-preset", "medium", "-crf", quality_value]);
         }
     }
-    command.args(["-movflags", "+faststart", "-progress", "pipe:1", "-nostats", &output_path]);
+    if format != "webm" {
+        command.args(["-movflags", "+faststart"]);
+    }
+    command.args(["-progress", "pipe:1", "-nostats", &output_path]);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     let stderr = child.stderr.take();

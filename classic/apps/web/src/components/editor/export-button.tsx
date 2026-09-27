@@ -152,6 +152,12 @@ function ExportPopover({
 
 	const handleNativeExport = async () => {
 		if (!window.__TAURI__) return;
+		if (activeProject.settings.background.type === "blur") {
+			toast.error(
+				"Background blur chưa hỗ trợ Native GPU; hãy dùng màu nền hoặc Export OpenCut.",
+			);
+			return;
+		}
 		const scene = editor.scenes.getActiveScene();
 		const assets = new Map(
 			editor.media.getAssets().map((asset) => [asset.id, asset]),
@@ -343,8 +349,13 @@ function ExportPopover({
 				]
 			: [];
 		const outputPath = await window.__TAURI__.dialog.save({
-			defaultPath: `${activeProject.metadata.name}.mp4`,
-			filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
+			defaultPath: `${activeProject.metadata.name}.${format}`,
+			filters: [
+				{
+					name: format === "webm" ? "WebM Video" : "MP4 Video",
+					extensions: [format],
+				},
+			],
 		});
 		if (!outputPath) return;
 		setIsNativeExporting(true);
@@ -365,6 +376,8 @@ function ExportPopover({
 				encoder: nativeEncoder,
 				quality,
 				totalDuration: editor.timeline.getTotalDuration() / TICKS_PER_SECOND,
+				format,
+				backgroundColor: activeProject.settings.background.color,
 			});
 			toast.success("Đã xuất video bằng FFmpeg/GPU", {
 				description: outputPath,
@@ -439,7 +452,7 @@ function ExportPopover({
 								className="mb-2 h-9 w-full rounded-md border bg-background px-2 text-sm"
 								value={nativeEncoder}
 								onChange={(event) => setNativeEncoder(event.target.value)}
-								disabled={isNativeExporting}
+								disabled={isNativeExporting || format === "webm"}
 							>
 								<option value="cpu">CPU · libx264</option>
 								{nativeEncoders.includes("nvidia") ? (
@@ -452,6 +465,11 @@ function ExportPopover({
 									<option value="amd">AMD · AMF</option>
 								) : null}
 							</select>
+							{format === "webm" ? (
+								<p className="mb-2 text-xs text-muted-foreground">
+									WebM sử dụng VP9 bằng CPU để đảm bảo tương thích.
+								</p>
+							) : null}
 							{isNativeExporting ? (
 								<div className="mb-2 space-y-1">
 									<Progress value={nativeProgress} />
