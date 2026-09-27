@@ -209,10 +209,36 @@ struct NativeTimelineOverlay {
     opacity: f64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeTimelineText {
+    content: String,
+    start: f64,
+    duration: f64,
+    font_size: f64,
+    color: String,
+    position_x: f64,
+    position_y: f64,
+    opacity: f64,
+}
+
+fn escape_drawtext(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace(':', "\\:")
+        .replace('\'', "\\'")
+        .replace('%', "\\%")
+        .replace(',', "\\,")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+        .replace('\n', "\\n")
+}
+
 #[tauri::command]
 fn render_native_timeline(
     clips: Vec<NativeTimelineClip>,
     overlays: Vec<NativeTimelineOverlay>,
+    texts: Vec<NativeTimelineText>,
     audios: Vec<NativeTimelineAudio>,
     output_path: String,
     width: u32,
@@ -292,6 +318,15 @@ fn render_native_timeline(
         let overlay_height = ((overlay.source_height as f64) * overlay.scale_y.abs()).round().max(2.0) as u32;
         let next_output = format!("outv{}", overlay_index + 1);
         filter.push_str(&format!(";[{input_index}:v]scale={overlay_width}:{overlay_height},format=rgba,colorchannelmixer=aa={},setpts=PTS-STARTPTS+{}/TB[ov{overlay_index}];[{}][ov{overlay_index}]overlay=x=(W-w)/2+{}:y=(H-h)/2+{}:enable='between(t,{},{})'[{}]", overlay.opacity.clamp(0.0, 1.0), overlay.start, video_output, overlay.position_x, overlay.position_y, overlay.start, overlay.start + overlay.duration, next_output));
+        video_output = next_output;
+    }
+    let arial = PathBuf::from(r"C:\Windows\Fonts\arial.ttf");
+    for (text_index, text) in texts.iter().enumerate() {
+        let next_output = format!("outt{}", text_index + 1);
+        let content = escape_drawtext(&text.content);
+        let color = text.color.trim_start_matches('#');
+        let font_file = arial.to_string_lossy().replace('\\', "/").replace(':', "\\:");
+        filter.push_str(&format!(";[{}]drawtext=fontfile='{}':text='{}':fontsize={}:fontcolor=#{}@{}:x=(w-text_w)/2+{}:y=(h-text_h)/2+{}:enable='between(t,{},{})'[{}]", video_output, font_file, content, text.font_size.max(1.0), color, text.opacity.clamp(0.0, 1.0), text.position_x, text.position_y, text.start, text.start + text.duration, next_output));
         video_output = next_output;
     }
     if !audios.is_empty() {

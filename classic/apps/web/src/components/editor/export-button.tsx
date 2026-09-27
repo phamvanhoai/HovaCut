@@ -127,13 +127,18 @@ function ExportPopover({
 			[],
 		);
 		const hasUnsupportedOverlay = overlayElements.some((element) => {
-			if (element.type !== "video" && element.type !== "image") return true;
+			if (
+				element.type !== "video" &&
+				element.type !== "image" &&
+				element.type !== "text"
+			)
+				return true;
 			const transform = buildTransformFromParams({ params: element.params });
 			return (
 				transform.rotate !== 0 ||
 				Boolean(element.animations) ||
 				(element.effects?.length ?? 0) > 0 ||
-				(element.masks?.length ?? 0) > 0 ||
+				("masks" in element && (element.masks?.length ?? 0) > 0) ||
 				(typeof element.params.blendMode === "string" &&
 					element.params.blendMode !== "normal")
 			);
@@ -166,10 +171,38 @@ function ExportPopover({
 				},
 			];
 		});
-		if (overlays.length !== overlayElements.length) {
+		const mediaOverlayCount = overlayElements.filter(
+			(element) => element.type === "video" || element.type === "image",
+		).length;
+		if (overlays.length !== mediaOverlayCount) {
 			toast.error("Một số overlay không còn file gốc hoặc thiếu kích thước.");
 			return;
 		}
+		const texts = overlayElements.flatMap((element) => {
+			if (element.type !== "text") return [];
+			const transform = buildTransformFromParams({ params: element.params });
+			return [
+				{
+					content:
+						typeof element.params.content === "string"
+							? element.params.content
+							: "",
+					start: element.startTime / TICKS_PER_SECOND,
+					duration: element.duration / TICKS_PER_SECOND,
+					fontSize:
+						typeof element.params.fontSize === "number"
+							? element.params.fontSize
+							: 32,
+					color:
+						typeof element.params.color === "string"
+							? element.params.color
+							: "#ffffff",
+					positionX: transform.position.x,
+					positionY: transform.position.y,
+					opacity: readOpacityFromParams({ params: element.params }),
+				},
+			];
+		});
 		const sourceClips = scene.tracks.main.elements.flatMap((element) => {
 			if (element.type !== "video" && element.type !== "image") return [];
 			const asset = assets.get(element.mediaId);
@@ -290,6 +323,7 @@ function ExportPopover({
 			await window.__TAURI__.core.invoke("render_native_timeline", {
 				clips,
 				overlays,
+				texts,
 				audios,
 				outputPath,
 				width: activeProject.settings.canvasSize.width,
