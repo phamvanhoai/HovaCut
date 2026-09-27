@@ -144,6 +144,48 @@ function ExportPopover({
 			toast.error("Timeline phải chỉ gồm video/ảnh được nhập từ ổ đĩa.");
 			return;
 		}
+		const audios = shouldIncludeAudio
+			? [
+					...scene.tracks.main.elements.flatMap((element) => {
+						if (
+							element.type !== "video" ||
+							element.isSourceAudioEnabled === false
+						)
+							return [];
+						const asset = assets.get(element.mediaId);
+						if (!asset?.sourcePath || asset.hasAudio === false) return [];
+						return [
+							{
+								path: asset.sourcePath,
+								start: element.startTime / TICKS_PER_SECOND,
+								duration: element.duration / TICKS_PER_SECOND,
+								trimStart: element.trimStart / TICKS_PER_SECOND,
+								volume: 1,
+							},
+						];
+					}),
+					...scene.tracks.audio.flatMap((track) =>
+						track.elements.flatMap((element) => {
+							if (element.sourceType !== "upload") return [];
+							const asset = assets.get(element.mediaId);
+							if (!asset?.sourcePath) return [];
+							const volume =
+								typeof element.params.volume === "number"
+									? element.params.volume / 100
+									: 1;
+							return [
+								{
+									path: asset.sourcePath,
+									start: element.startTime / TICKS_PER_SECOND,
+									duration: element.duration / TICKS_PER_SECOND,
+									trimStart: element.trimStart / TICKS_PER_SECOND,
+									volume,
+								},
+							];
+						}),
+					),
+				]
+			: [];
 		const outputPath = await window.__TAURI__.dialog.save({
 			defaultPath: `${activeProject.metadata.name}.mp4`,
 			filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
@@ -164,6 +206,7 @@ function ExportPopover({
 				activeProject.settings.fps.denominator;
 			await window.__TAURI__.core.invoke("render_native_timeline", {
 				clips,
+				audios,
 				outputPath,
 				width: activeProject.settings.canvasSize.width,
 				height: activeProject.settings.canvasSize.height,

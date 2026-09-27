@@ -181,9 +181,20 @@ struct NativeTimelineClip {
     trim_start: f64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeTimelineAudio {
+    path: String,
+    start: f64,
+    duration: f64,
+    trim_start: f64,
+    volume: f64,
+}
+
 #[tauri::command]
 fn render_native_timeline(
     clips: Vec<NativeTimelineClip>,
+    audios: Vec<NativeTimelineAudio>,
     output_path: String,
     width: u32,
     height: u32,
@@ -216,6 +227,9 @@ fn render_native_timeline(
             ]);
         }
     }
+    for audio in &audios {
+        command.args(["-i", &audio.path]);
+    }
     let mut filter = String::new();
     for index in 0..clips.len() {
         filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1,format=yuv420p[v{index}];"));
@@ -224,26 +238,30 @@ fn render_native_timeline(
         filter.push_str(&format!("[v{index}]"));
     }
     filter.push_str(&format!("concat=n={}:v=1:a=0[outv]", clips.len()));
+    if !audios.is_empty() {
+        filter.push(';');
+        for (audio_index, audio) in audios.iter().enumerate() {
+            let input_index = clips.len() + audio_index;
+            let delay = (audio.start.max(0.0) * 1000.0).round() as u64;
+            filter.push_str(&format!("[{input_index}:a]atrim=start={}:duration={},asetpts=PTS-STARTPTS,adelay={delay}|{delay},volume={}[a{audio_index}];", audio.trim_start, audio.duration, audio.volume));
+        }
+        for index in 0..audios.len() {
+            filter.push_str(&format!("[a{index}]"));
+        }
+        filter.push_str(&format!("amix=inputs={}:normalize=0[outa]", audios.len()));
+    }
     let video_encoder = match encoder.as_str() {
         "nvidia" => "h264_nvenc",
         "intel" => "h264_qsv",
         "amd" => "h264_amf",
         _ => "libx264",
     };
+    command.args(["-filter_complex", &filter, "-map", "[outv]"]);
+    if !audios.is_empty() {
+        command.args(["-map", "[outa]", "-c:a", "aac", "-b:a", "192k"]);
+    }
     let output = command
-        .args([
-            "-filter_complex",
-            &filter,
-            "-map",
-            "[outv]",
-            "-c:v",
-            video_encoder,
-            "-preset",
-            "fast",
-            "-movflags",
-            "+faststart",
-            &output_path,
-        ])
+        .args(["-c:v", video_encoder, "-preset", "fast", "-movflags", "+faststart", &output_path])
         .output()
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
