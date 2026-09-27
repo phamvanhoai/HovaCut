@@ -251,13 +251,74 @@ fn render_auto_mp3(
     Ok(outputs)
 }
 
+#[tauri::command]
+fn render_join_audio(
+    audio_paths: Vec<String>,
+    output_path: String,
+    export_tracks: bool,
+) -> Result<Vec<String>, String> {
+    if audio_paths.len() < 2 {
+        return Err("Chọn ít nhất hai file audio.".into());
+    }
+    if audio_paths.iter().any(|value| !Path::new(value).is_file()) {
+        return Err("Một hoặc nhiều file audio không còn tồn tại.".into());
+    }
+    let mut args = vec!["-y".to_string()];
+    for input in &audio_paths {
+        args.extend(["-i".into(), input.clone()]);
+    }
+    let labels = (0..audio_paths.len())
+        .map(|index| format!("[{index}:a:0]"))
+        .collect::<String>();
+    args.extend([
+        "-filter_complex".into(),
+        format!("{labels}concat=n={}:v=0:a=1[outa]", audio_paths.len()),
+        "-map".into(),
+        "[outa]".into(),
+        "-ar".into(),
+        "44100".into(),
+        "-ac".into(),
+        "2".into(),
+        "-c:a".into(),
+        "libmp3lame".into(),
+        "-b:a".into(),
+        "320k".into(),
+        output_path.clone(),
+    ]);
+    let output = Command::new(ffmpeg_path())
+        .args(args)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let mut outputs = vec![output_path.clone()];
+    if export_tracks {
+        let txt_path = Path::new(&output_path).with_extension("txt");
+        let mut elapsed = 0.0;
+        let mut tracks = Vec::new();
+        for input in &audio_paths {
+            let name = Path::new(input)
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("Track");
+            tracks.push(format!("{} {}", track_time(elapsed), name));
+            elapsed += audio_duration(input);
+        }
+        fs::write(&txt_path, tracks.join("\r\n")).map_err(|error| error.to_string())?;
+        outputs.push(txt_path.to_string_lossy().into_owned());
+    }
+    Ok(outputs)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_media_files,
             render_auto_video,
-            render_auto_mp3
+            render_auto_mp3,
+            render_join_audio
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động HovaCut Desktop");
