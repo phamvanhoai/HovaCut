@@ -63,6 +63,12 @@ type TauriApi = {
 		) => Promise<string | string[] | null>;
 		save: (options: Record<string, unknown>) => Promise<string | null>;
 	};
+	event: {
+		listen: <T>(
+			event: string,
+			handler: (event: { payload: T }) => void,
+		) => Promise<() => void>;
+	};
 };
 
 declare global {

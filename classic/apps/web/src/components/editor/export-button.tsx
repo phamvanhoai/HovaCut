@@ -115,6 +115,7 @@ function ExportPopover({
 		DEFAULT_EXPORT_OPTIONS.includeAudio ?? true,
 	);
 	const [isNativeExporting, setIsNativeExporting] = useState(false);
+	const [nativeProgress, setNativeProgress] = useState(0);
 	const [nativeEncoders, setNativeEncoders] = useState<string[]>([]);
 	const [nativeEncoder, setNativeEncoder] = useState("cpu");
 
@@ -134,6 +135,19 @@ function ExportPopover({
 								: "cpu",
 				);
 			});
+	}, []);
+
+	useEffect(() => {
+		if (!window.__TAURI__) return;
+		let unlisten: (() => void) | undefined;
+		void window.__TAURI__.event
+			.listen<number>("native-export-progress", (event) => {
+				setNativeProgress(Math.round(event.payload * 100));
+			})
+			.then((dispose) => {
+				unlisten = dispose;
+			});
+		return () => unlisten?.();
 	}, []);
 
 	const handleNativeExport = async () => {
@@ -334,6 +348,7 @@ function ExportPopover({
 		});
 		if (!outputPath) return;
 		setIsNativeExporting(true);
+		setNativeProgress(0);
 		try {
 			const fpsValue =
 				activeProject.settings.fps.numerator /
@@ -349,6 +364,7 @@ function ExportPopover({
 				fps: fpsValue,
 				encoder: nativeEncoder,
 				quality,
+				totalDuration: editor.timeline.getTotalDuration() / TICKS_PER_SECOND,
 			});
 			toast.success("Đã xuất video bằng FFmpeg/GPU", {
 				description: outputPath,
@@ -360,7 +376,12 @@ function ExportPopover({
 			});
 		} finally {
 			setIsNativeExporting(false);
+			setNativeProgress(0);
 		}
+	};
+
+	const handleCancelNative = () => {
+		void window.__TAURI__?.core.invoke("cancel_native_timeline");
 	};
 
 	const handleExport = async () => {
@@ -431,13 +452,23 @@ function ExportPopover({
 									<option value="amd">AMD · AMF</option>
 								) : null}
 							</select>
+							{isNativeExporting ? (
+								<div className="mb-2 space-y-1">
+									<Progress value={nativeProgress} />
+									<div className="text-center text-xs text-muted-foreground">
+										{nativeProgress}%
+									</div>
+								</div>
+							) : null}
 							<Button
 								className="w-full"
-								onClick={handleNativeExport}
-								disabled={isNativeExporting}
+								onClick={
+									isNativeExporting ? handleCancelNative : handleNativeExport
+								}
+								variant={isNativeExporting ? "destructive" : "default"}
 							>
 								{isNativeExporting
-									? "FFmpeg đang xuất..."
+									? "Hủy xuất video"
 									: "Xuất nhanh bằng GPU (Beta)"}
 							</Button>
 						</div>

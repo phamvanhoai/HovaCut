@@ -2,10 +2,16 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::{
     env, fs,
+    io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tauri::Emitter;
+
+static CANCEL_NATIVE_RENDER: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 fn list_media_files(directory: String, extensions: Vec<String>) -> Result<Vec<String>, String> {
@@ -264,6 +270,7 @@ fn windows_font_path(family: &str) -> PathBuf {
 
 #[tauri::command]
 fn render_native_timeline(
+    window: tauri::Window,
     clips: Vec<NativeTimelineClip>,
     overlays: Vec<NativeTimelineOverlay>,
     texts: Vec<NativeTimelineText>,
@@ -274,7 +281,9 @@ fn render_native_timeline(
     fps: f64,
     encoder: String,
     quality: String,
+    total_duration: f64,
 ) -> Result<String, String> {
+    CANCEL_NATIVE_RENDER.store(false, Ordering::SeqCst);
     if clips.is_empty()
         || clips
             .iter()
@@ -402,14 +411,46 @@ fn render_native_timeline(
             command.args(["-preset", "medium", "-crf", quality_value]);
         }
     }
-    let output = command
-        .args(["-movflags", "+faststart", &output_path])
-        .output()
-        .map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    command.args(["-movflags", "+faststart", "-progress", "pipe:1", "-nostats", &output_path]);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let stderr = child.stderr.take();
+    let stderr_thread = thread::spawn(move || {
+        let mut message = String::new();
+        if let Some(mut stream) = stderr {
+            let _ = stream.read_to_string(&mut message);
+        }
+        message
+    });
+    if let Some(stdout) = child.stdout.take() {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if CANCEL_NATIVE_RENDER.load(Ordering::SeqCst) {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stderr_thread.join();
+                let _ = fs::remove_file(&output_path);
+                return Err("Đã hủy xuất video.".into());
+            }
+            if let Some(value) = line.strip_prefix("out_time_ms=") {
+                if let Ok(microseconds) = value.parse::<f64>() {
+                    let progress = (microseconds / 1_000_000.0 / total_duration.max(0.001)).clamp(0.0, 1.0);
+                    let _ = window.emit("native-export-progress", progress);
+                }
+            }
+        }
     }
+    let status = child.wait().map_err(|error| error.to_string())?;
+    let stderr_message = stderr_thread.join().unwrap_or_default();
+    if !status.success() {
+        return Err(stderr_message);
+    }
+    let _ = window.emit("native-export-progress", 1.0_f64);
     Ok(output_path)
+}
+
+#[tauri::command]
+fn cancel_native_timeline() {
+    CANCEL_NATIVE_RENDER.store(true, Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -782,6 +823,7 @@ fn main() {
             export_project_json,
             detect_video_encoders,
             render_native_timeline,
+            cancel_native_timeline,
             render_auto_video,
             render_auto_mp3,
             render_join_audio,
