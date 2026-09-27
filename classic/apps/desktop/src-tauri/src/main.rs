@@ -145,12 +145,119 @@ fn render_auto_video(
     Ok(output_path)
 }
 
+fn audio_duration(path: &str) -> f64 {
+    let Ok(output) = Command::new(ffmpeg_path()).args(["-i", path]).output() else {
+        return 0.0;
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let Some(value) = stderr
+        .split("Duration: ")
+        .nth(1)
+        .and_then(|part| part.split(',').next())
+    else {
+        return 0.0;
+    };
+    let parts: Vec<f64> = value
+        .split(':')
+        .filter_map(|part| part.parse().ok())
+        .collect();
+    if parts.len() == 3 {
+        parts[0] * 3600.0 + parts[1] * 60.0 + parts[2]
+    } else {
+        0.0
+    }
+}
+
+fn track_time(seconds: f64) -> String {
+    let total = seconds.max(0.0).floor() as u64;
+    format!(
+        "{:02}:{:02}:{:02}",
+        total / 3600,
+        (total % 3600) / 60,
+        total % 60
+    )
+}
+
+#[tauri::command]
+fn render_auto_mp3(
+    good_paths: Vec<String>,
+    other_paths: Vec<String>,
+    good_count: usize,
+    other_count: usize,
+    output_count: usize,
+    output_directory: String,
+) -> Result<Vec<String>, String> {
+    if good_count + other_count < 2 {
+        return Err("Mỗi playlist cần ít nhất 2 bài.".into());
+    }
+    if good_count > good_paths.len() || other_count > other_paths.len() {
+        return Err("Số bài yêu cầu lớn hơn số file trong thư mục.".into());
+    }
+    fs::create_dir_all(&output_directory).map_err(|error| error.to_string())?;
+    let mut outputs = Vec::new();
+    for output_index in 0..output_count.clamp(1, 20) {
+        let mut selected = shuffled(good_paths.clone())
+            .into_iter()
+            .take(good_count)
+            .collect::<Vec<_>>();
+        selected.extend(shuffled(other_paths.clone()).into_iter().take(other_count));
+        selected = shuffled(selected);
+        let base = format!("hovacut-auto-mp3-{:02}", output_index + 1);
+        let mp3_path = PathBuf::from(&output_directory).join(format!("{base}.mp3"));
+        let txt_path = PathBuf::from(&output_directory).join(format!("{base}.txt"));
+        let mut args = vec!["-y".to_string()];
+        for input in &selected {
+            args.extend(["-i".into(), input.clone()]);
+        }
+        let labels = (0..selected.len())
+            .map(|index| format!("[{index}:a:0]"))
+            .collect::<String>();
+        args.extend([
+            "-filter_complex".into(),
+            format!("{labels}concat=n={}:v=0:a=1[outa]", selected.len()),
+            "-map".into(),
+            "[outa]".into(),
+            "-ar".into(),
+            "44100".into(),
+            "-ac".into(),
+            "2".into(),
+            "-c:a".into(),
+            "libmp3lame".into(),
+            "-b:a".into(),
+            "320k".into(),
+            mp3_path.to_string_lossy().into_owned(),
+        ]);
+        let output = Command::new(ffmpeg_path())
+            .args(args)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+        }
+        let mut elapsed = 0.0;
+        let mut tracks = Vec::new();
+        for input in &selected {
+            let name = Path::new(input)
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("Track");
+            tracks.push(format!("{} {}", track_time(elapsed), name));
+            elapsed += audio_duration(input);
+        }
+        fs::write(&txt_path, tracks.join("\r\n")).map_err(|error| error.to_string())?;
+        outputs.push(mp3_path.to_string_lossy().into_owned());
+        outputs.push(txt_path.to_string_lossy().into_owned());
+    }
+    Ok(outputs)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_media_files,
-            render_auto_video
+            render_auto_video,
+            render_auto_mp3
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động HovaCut Desktop");
