@@ -124,7 +124,7 @@ function ExportPopover({
 			toast.error("Native GPU hiện chưa hỗ trợ overlay/chữ/hiệu ứng.");
 			return;
 		}
-		const clips = scene.tracks.main.elements.flatMap((element) => {
+		const sourceClips = scene.tracks.main.elements.flatMap((element) => {
 			if (element.type !== "video" && element.type !== "image") return [];
 			const asset = assets.get(element.mediaId);
 			if (!asset?.sourcePath) return [];
@@ -134,12 +134,49 @@ function ExportPopover({
 					kind: element.type,
 					duration: element.duration / TICKS_PER_SECOND,
 					trimStart: element.trimStart / TICKS_PER_SECOND,
+					rate: element.type === "video" ? (element.retime?.rate ?? 1) : 1,
 				},
 			];
 		});
+		const clips: Array<{
+			path: string;
+			kind: string;
+			duration: number;
+			trimStart: number;
+			rate: number;
+		}> = [];
+		let cursor = 0;
+		for (const element of [...scene.tracks.main.elements].sort(
+			(a, b) => a.startTime - b.startTime,
+		)) {
+			const asset =
+				"mediaId" in element ? assets.get(element.mediaId) : undefined;
+			if (
+				!asset?.sourcePath ||
+				(element.type !== "video" && element.type !== "image")
+			)
+				continue;
+			const start = element.startTime / TICKS_PER_SECOND;
+			if (start > cursor)
+				clips.push({
+					path: "",
+					kind: "blank",
+					duration: start - cursor,
+					trimStart: 0,
+					rate: 1,
+				});
+			clips.push({
+				path: asset.sourcePath,
+				kind: element.type,
+				duration: element.duration / TICKS_PER_SECOND,
+				trimStart: element.trimStart / TICKS_PER_SECOND,
+				rate: element.type === "video" ? (element.retime?.rate ?? 1) : 1,
+			});
+			cursor = Math.max(cursor, start + element.duration / TICKS_PER_SECOND);
+		}
 		if (
-			clips.length !== scene.tracks.main.elements.length ||
-			clips.length === 0
+			sourceClips.length !== scene.tracks.main.elements.length ||
+			sourceClips.length === 0
 		) {
 			toast.error("Timeline phải chỉ gồm video/ảnh được nhập từ ổ đĩa.");
 			return;

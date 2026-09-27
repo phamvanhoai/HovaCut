@@ -179,6 +179,7 @@ struct NativeTimelineClip {
     kind: String,
     duration: f64,
     trim_start: f64,
+    rate: f64,
 }
 
 #[derive(Deserialize)]
@@ -201,13 +202,26 @@ fn render_native_timeline(
     fps: f64,
     encoder: String,
 ) -> Result<String, String> {
-    if clips.is_empty() || clips.iter().any(|clip| !Path::new(&clip.path).is_file()) {
+    if clips.is_empty()
+        || clips
+            .iter()
+            .any(|clip| clip.kind != "blank" && !Path::new(&clip.path).is_file())
+    {
         return Err("Timeline không có media native hợp lệ.".into());
     }
     let mut command = Command::new(ffmpeg_path());
     command.arg("-y");
     for clip in &clips {
-        if clip.kind == "image" {
+        if clip.kind == "blank" {
+            command.args([
+                "-f",
+                "lavfi",
+                "-t",
+                &clip.duration.to_string(),
+                "-i",
+                &format!("color=c=black:s={width}x{height}:r={fps}"),
+            ]);
+        } else if clip.kind == "image" {
             command.args([
                 "-loop",
                 "1",
@@ -217,11 +231,12 @@ fn render_native_timeline(
                 &clip.path,
             ]);
         } else {
+            let source_duration = clip.duration * clip.rate.max(0.01);
             command.args([
                 "-ss",
                 &clip.trim_start.to_string(),
                 "-t",
-                &clip.duration.to_string(),
+                &source_duration.to_string(),
                 "-i",
                 &clip.path,
             ]);
@@ -231,8 +246,13 @@ fn render_native_timeline(
         command.args(["-i", &audio.path]);
     }
     let mut filter = String::new();
-    for index in 0..clips.len() {
-        filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1,format=yuv420p[v{index}];"));
+    for (index, clip) in clips.iter().enumerate() {
+        let setpts = if clip.kind == "video" && (clip.rate - 1.0).abs() > 0.001 {
+            format!(",setpts=PTS/{}", clip.rate.max(0.01))
+        } else {
+            String::new()
+        };
+        filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1,format=yuv420p{setpts}[v{index}];"));
     }
     for index in 0..clips.len() {
         filter.push_str(&format!("[v{index}]"));
