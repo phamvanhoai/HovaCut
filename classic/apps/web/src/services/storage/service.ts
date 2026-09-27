@@ -309,6 +309,34 @@ class StorageService {
 		}
 	}
 
+	async importDesktopProject({ inputPath }: { inputPath: string }): Promise<string> {
+		const serializedProject = await desktopInvoke<SerializedProject>({
+			command: "import_project_json",
+			args: { inputPath },
+		});
+		if (!serializedProject?.metadata?.id) {
+			throw new Error("File project không hợp lệ.");
+		}
+		await this.projectsAdapter.set({
+			key: serializedProject.metadata.id,
+			value: serializedProject,
+		});
+		return serializedProject.metadata.id;
+	}
+
+	async exportDesktopProject({
+		id,
+		outputPath,
+	}: {
+		id: string;
+		outputPath: string;
+	}): Promise<void> {
+		await desktopInvoke({
+			command: "export_project_json",
+			args: { projectId: id, outputPath },
+		});
+	}
+
 	async saveMediaAsset({
 		projectId,
 		mediaAsset,

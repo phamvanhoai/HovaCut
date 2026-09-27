@@ -139,6 +139,34 @@ export default function ProjectsPage() {
 
 function ProjectsHeader() {
 	const { viewMode, isHydrated, setViewMode } = useProjectsStore();
+	const editor = useEditor();
+	const router = useRouter();
+	const [isDesktop, setIsDesktop] = useState(false);
+
+	useEffect(() => {
+		const timer = window.setTimeout(
+			() => setIsDesktop(Boolean(window.__TAURI__)),
+			0,
+		);
+		return () => window.clearTimeout(timer);
+	}, []);
+
+	const handleOpenProject = async () => {
+		const inputPath = await window.__TAURI__?.dialog.open({
+			multiple: false,
+			directory: false,
+			filters: [{ name: "HovaCut project", extensions: ["json"] }],
+		});
+		if (typeof inputPath !== "string") return;
+		try {
+			const projectId = await editor.project.importDesktopProject({ inputPath });
+			router.push(`/editor/${projectId}`);
+		} catch (error) {
+			toast.error("Không thể mở project", {
+				description: error instanceof Error ? error.message : "File không hợp lệ",
+			});
+		}
+	};
 
 	return (
 		<header className="sticky top-0 z-20 px-8 bg-background flex flex-col gap-2">
@@ -184,6 +212,11 @@ function ProjectsHeader() {
 
 				<div className="flex items-center gap-3 md:gap-4">
 					<SearchBar className="hidden md:block" />
+					{isDesktop ? (
+						<Button variant="outline" size="lg" onClick={handleOpenProject}>
+							Mở project
+						</Button>
+					) : null}
 					<Button asChild variant="outline" size="lg">
 						<Link href="/automation">Automation</Link>
 					</Button>
@@ -397,6 +430,7 @@ function ProjectActions() {
 	const editor = useEditor();
 	const { selectedProjectIds, clearSelectedProjects } = useProjectsStore();
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+	const isDesktop = typeof window !== "undefined" && Boolean(window.__TAURI__);
 
 	const savedProjects = editor.project.getSavedProjects();
 	const selectedProjectNames = savedProjects
@@ -418,6 +452,26 @@ function ProjectActions() {
 		setIsDeleteDialogOpen(false);
 	};
 
+	const handleExport = async () => {
+		const projectId = selectedProjectIds[0];
+		const project = savedProjects.find((item) => item.id === projectId);
+		if (!projectId || !project || !window.__TAURI__) return;
+		const safeName = project.name.replace(/[<>:"/\\|?*]/g, "-");
+		const outputPath = await window.__TAURI__.dialog.save({
+			defaultPath: `${safeName}.hovacut.json`,
+			filters: [{ name: "HovaCut project", extensions: ["json"] }],
+		});
+		if (!outputPath) return;
+		try {
+			await editor.project.exportDesktopProject({ id: projectId, outputPath });
+			toast.success("Đã xuất project", { description: outputPath });
+		} catch (error) {
+			toast.error("Không thể xuất project", {
+				description: error instanceof Error ? error.message : "Có lỗi xảy ra",
+			});
+		}
+	};
+
 	const actionHandlers: Record<string, () => void> = {
 		duplicate: handleDuplicate,
 		delete: handleDeleteClick,
@@ -427,6 +481,11 @@ function ProjectActions() {
 		<>
 			<div className="flex items-center gap-2.5 px-3">
 				<div className="hidden sm:flex items-center gap-2.5">
+					{isDesktop && selectedProjectIds.length === 1 ? (
+						<Button variant="outline" className="h-9" onClick={handleExport}>
+							Xuất project
+						</Button>
+					) : null}
 					{PROJECT_ACTIONS.map((action) => (
 						<Button
 							key={action.id}

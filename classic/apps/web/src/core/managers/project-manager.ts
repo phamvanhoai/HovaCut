@@ -273,6 +273,22 @@ export class ProjectManager {
 		}
 	}
 
+	async importDesktopProject({ inputPath }: { inputPath: string }): Promise<string> {
+		const projectId = await storageService.importDesktopProject({ inputPath });
+		await this.loadAllProjects();
+		return projectId;
+	}
+
+	async exportDesktopProject({
+		id,
+		outputPath,
+	}: {
+		id: string;
+		outputPath: string;
+	}): Promise<void> {
+		await storageService.exportDesktopProject({ id, outputPath });
+	}
+
 	async deleteProjects({ ids }: { ids: string[] }): Promise<void> {
 		const uniqueIds = Array.from(new Set(ids));
 		if (uniqueIds.length === 0) return;

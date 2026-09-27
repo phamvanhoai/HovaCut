@@ -71,6 +71,44 @@ fn delete_project_json(project_id: String) -> Result<(), String> {
     Ok(())
 }
 
+fn project_id_from_json(project: &Value) -> Result<String, String> {
+    let project_id = project
+        .get("metadata")
+        .and_then(|metadata| metadata.get("id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "File project thiếu metadata.id.".to_string())?;
+    if project_id.is_empty()
+        || !project_id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
+    {
+        return Err("ID project không hợp lệ.".into());
+    }
+    Ok(project_id.to_string())
+}
+
+#[tauri::command]
+fn import_project_json(input_path: String) -> Result<Value, String> {
+    let content = fs::read(&input_path).map_err(|error| error.to_string())?;
+    let project: Value = serde_json::from_slice(&content)
+        .map_err(|error| format!("File project không phải JSON hợp lệ: {error}"))?;
+    let project_id = project_id_from_json(&project)?;
+    let destination = projects_directory()?.join(format!("{project_id}.hovacut.json"));
+    let normalized = serde_json::to_vec_pretty(&project).map_err(|error| error.to_string())?;
+    fs::write(destination, normalized).map_err(|error| error.to_string())?;
+    Ok(project)
+}
+
+#[tauri::command]
+fn export_project_json(project_id: String, output_path: String) -> Result<String, String> {
+    let source = projects_directory()?.join(format!("{project_id}.hovacut.json"));
+    if !source.is_file() {
+        return Err("Không tìm thấy dữ liệu project đã lưu.".into());
+    }
+    fs::copy(source, &output_path).map_err(|error| error.to_string())?;
+    Ok(output_path)
+}
+
 fn ffmpeg_path() -> PathBuf {
     if let Ok(configured) = env::var("HOVACUT_FFMPEG_PATH") {
         if !configured.trim().is_empty() {
@@ -499,6 +537,8 @@ fn main() {
             save_project_json,
             load_project_json,
             delete_project_json,
+            import_project_json,
+            export_project_json,
             detect_video_encoders,
             render_auto_video,
             render_auto_mp3,
