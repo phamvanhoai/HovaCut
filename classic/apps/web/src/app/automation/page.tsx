@@ -80,17 +80,17 @@ export default function AutomationPage() {
 	};
 
 	return (
-		<main className="min-h-screen bg-muted/20">
+		<main className="flex min-h-screen flex-col bg-muted/20">
 			<header className="border-b bg-background">
-				<div className="mx-auto flex h-16 max-w-[1440px] items-center gap-4 px-6">
+				<div className="flex h-16 w-full items-center gap-4 px-5">
 					<Button asChild variant="ghost" size="icon"><Link href="/projects" aria-label="Quay lại projects"><ArrowLeft /></Link></Button>
 					<div><h1 className="text-lg font-semibold">HovaCut Automation</h1><p className="text-xs text-muted-foreground">FFmpeg cho batch · OpenCut cho timeline</p></div>
 					<div className="ml-auto"><EngineStatus status={status} /></div>
 				</div>
 			</header>
 
-			<div className="mx-auto grid max-w-[1440px] gap-5 px-5 py-5 lg:grid-cols-[250px_minmax(0,1fr)_320px]">
-				<aside className="h-fit rounded-lg border bg-background p-2 lg:sticky lg:top-5">
+			<div className="grid w-full flex-1 gap-4 p-4 lg:grid-cols-[260px_minmax(0,1fr)_340px]">
+				<aside className="h-fit rounded-lg border bg-background p-2 lg:sticky lg:top-4">
 					<p className="px-3 pb-2 pt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Công cụ</p>
 					<nav className="space-y-1">{TOOLS.map((tool) => <button key={tool.id} type="button" onClick={() => { setSelectedTool(tool.id); setError(null); }} className={`flex w-full items-center gap-3 rounded-md px-3 py-3 text-left transition ${selectedTool === tool.id ? "bg-foreground text-background" : "hover:bg-accent"}`}><tool.icon className="size-5 shrink-0" /><span className="min-w-0"><span className="block text-sm font-medium">{tool.label}</span><span className={`block text-xs ${selectedTool === tool.id ? "text-background/65" : "text-muted-foreground"}`}>{tool.description}</span></span></button>)}</nav>
 				</aside>
@@ -104,7 +104,7 @@ export default function AutomationPage() {
 					{selectedTool === "join-audio" && <ToolCard title="Ghép / Random MP3" description="Ghép 2–50 file thành một playlist MP3 320 kbps." icon={<ListMusic />}><form className="space-y-5" onSubmit={handleJoinAudio}><MultiFileField inputRef={joinAudioInput} /><label className="flex items-center gap-3 rounded-md border p-3 text-sm"><input type="checkbox" name="random" value="true" /><Shuffle className="size-4" /> Xáo trộn thứ tự trước khi ghép</label><SubmitButton busy={activeJob === "join-audio"} disabled={!status?.available || activeJob !== null} label="Tạo playlist MP3" icon={<Music2 />} /></form></ToolCard>}
 				</section>
 
-				<aside className="h-fit rounded-lg border bg-background lg:sticky lg:top-5"><div className="border-b px-4 py-3"><h2 className="font-semibold">Kết quả</h2><p className="text-xs text-muted-foreground">{jobs.length} file trong phiên này</p></div><div className="max-h-[70vh] space-y-2 overflow-y-auto p-3">{jobs.length === 0 ? <div className="rounded-md border border-dashed p-6 text-center"><Download className="mx-auto mb-2 size-5 text-muted-foreground" /><p className="text-sm text-muted-foreground">Chưa có file kết quả</p></div> : jobs.map((job) => <div key={job.id} className="flex items-center gap-3 rounded-md border p-3"><CheckCircle2 className="size-5 shrink-0 text-green-500" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{job.filename}</p><p className="text-xs text-muted-foreground">{job.createdAt.toLocaleTimeString("vi-VN")}</p></div><Button asChild variant="outline" size="icon"><a href={job.url} download={job.filename} aria-label="Tải file"><Download /></a></Button></div>)}</div></aside>
+				<aside className="h-fit rounded-lg border bg-background lg:sticky lg:top-4"><div className="border-b px-4 py-3"><h2 className="font-semibold">Kết quả</h2><p className="text-xs text-muted-foreground">{jobs.length} file trong phiên này</p></div><div className="max-h-[calc(100vh-7rem)] space-y-2 overflow-y-auto p-3">{jobs.length === 0 ? <div className="rounded-md border border-dashed p-6 text-center"><Download className="mx-auto mb-2 size-5 text-muted-foreground" /><p className="text-sm text-muted-foreground">Chưa có file kết quả</p></div> : jobs.map((job) => <div key={job.id} className="flex items-center gap-3 rounded-md border p-3"><CheckCircle2 className="size-5 shrink-0 text-green-500" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{job.filename}</p><p className="text-xs text-muted-foreground">{job.createdAt.toLocaleTimeString("vi-VN")}</p></div><Button asChild variant="outline" size="icon"><a href={job.url} download={job.filename} aria-label="Tải file"><Download /></a></Button></div>)}</div></aside>
 			</div>
 		</main>
 	);
