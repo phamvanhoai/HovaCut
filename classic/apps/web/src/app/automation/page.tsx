@@ -10,6 +10,9 @@ import type { FfmpegStatus } from "@/automation/types";
 
 type CompletedJob = { id: string; filename: string; url: string; createdAt: Date };
 type ToolId = "auto-video" | "auto-mp3" | "image-audio" | "convert" | "join-audio";
+type TauriApi = { core: { invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T> }; dialog: { open: (options: Record<string, unknown>) => Promise<string | string[] | null>; save: (options: Record<string, unknown>) => Promise<string | null> } };
+
+declare global { interface Window { __TAURI__?: TauriApi } }
 
 const TOOLS = [
 	{ id: "auto-video" as const, label: "Auto Video", description: "Random từ thư mục", icon: Clapperboard },
@@ -31,6 +34,10 @@ export default function AutomationPage() {
 	const [autoGoodFiles, setAutoGoodFiles] = useState<File[]>([]);
 	const [autoOtherFiles, setAutoOtherFiles] = useState<File[]>([]);
 	const [autoMp3Progress, setAutoMp3Progress] = useState<{ current: number; total: number } | null>(null);
+	const [desktopMode, setDesktopMode] = useState(false);
+	const [desktopAudioPath, setDesktopAudioPath] = useState("");
+	const [desktopVideoFolder, setDesktopVideoFolder] = useState("");
+	const [desktopVideoPaths, setDesktopVideoPaths] = useState<string[]>([]);
 	const objectUrls = useRef<string[]>([]);
 	const imageInput = useRef<HTMLInputElement>(null);
 	const audioInput = useRef<HTMLInputElement>(null);
@@ -49,6 +56,10 @@ export default function AutomationPage() {
 	}, []);
 
 	useEffect(() => () => objectUrls.current.forEach((url) => URL.revokeObjectURL(url)), []);
+	useEffect(() => {
+		const timer = window.setTimeout(() => setDesktopMode(Boolean(window.__TAURI__)), 0);
+		return () => window.clearTimeout(timer);
+	}, []);
 
 	useEffect(() => {
 		const missing = joinAudioFiles.filter((file) => audioDurations[audioFileKey(file)] === undefined);
@@ -206,6 +217,34 @@ export default function AutomationPage() {
 			setAutoMp3Progress(null);
 		}
 	};
+	const chooseDesktopAudio = async () => {
+		const path = await window.__TAURI__?.dialog.open({ multiple: false, directory: false, filters: [{ name: "Audio", extensions: ["mp3", "wav", "m4a", "aac", "ogg", "flac"] }] });
+		if (typeof path === "string") setDesktopAudioPath(path);
+	};
+	const chooseDesktopVideoFolder = async () => {
+		const folder = await window.__TAURI__?.dialog.open({ multiple: false, directory: true });
+		if (typeof folder !== "string" || !window.__TAURI__) return;
+		const paths = await window.__TAURI__.core.invoke<string[]>("list_media_files", { directory: folder, extensions: ["mp4", "mov", "mkv", "webm", "avi", "m4v"] });
+		setDesktopVideoFolder(folder);
+		setDesktopVideoPaths(paths);
+	};
+	const handleDesktopAutoVideo = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (!window.__TAURI__ || !desktopAudioPath || desktopVideoPaths.length === 0) return setError("Chọn audio và thư mục video.");
+		const outputPath = await window.__TAURI__.dialog.save({ defaultPath: "hovacut-auto-video.mp4", filters: [{ name: "MP4 Video", extensions: ["mp4"] }] });
+		if (!outputPath) return;
+		setError(null);
+		setActiveJob("auto-video");
+		try {
+			const resolution = String(new FormData(event.currentTarget).get("resolution") ?? "1080p");
+			await window.__TAURI__.core.invoke("render_auto_video", { audioPath: desktopAudioPath, videoPaths: desktopVideoPaths, outputPath, resolution });
+			setJobs((current) => [{ id: crypto.randomUUID(), filename: outputPath.split(/[\\/]/).pop() ?? "hovacut-auto-video.mp4", url: "", createdAt: new Date() }, ...current]);
+		} catch (reason) {
+			setError(typeof reason === "string" ? reason : reason instanceof Error ? reason.message : "Render desktop thất bại.");
+		} finally {
+			setActiveJob(null);
+		}
+	};
 	const handleAutoVideo = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		const audio = autoVideoAudioInput.current?.files?.[0];
@@ -254,7 +293,7 @@ export default function AutomationPage() {
 					{error && <div className="mb-4 flex gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"><CircleAlert className="mt-0.5 size-4 shrink-0" />{error}</div>}
 					{activeJob && <ProcessingBar activeJob={activeJob} detail={activeJob === "auto-mp3" && autoMp3Progress ? `Playlist ${autoMp3Progress.current}/${autoMp3Progress.total}` : undefined} />}
 					{selectedTool === "auto-mp3" && <ToolCard title="Auto MP3" description="Random nhạc từ hai thư mục và tạo nhiều playlist MP3 kèm Tracks List." icon={<Music2 />}><form className="space-y-5" onSubmit={handleAutoMp3}><div className="grid gap-4 sm:grid-cols-2"><AudioFolderField inputRef={autoGoodInput} label="Thư mục Nhạc hay" files={autoGoodFiles} onFilesChange={setAutoGoodFiles} /><AudioFolderField inputRef={autoOtherInput} label="Thư mục Nhạc khác" files={autoOtherFiles} onFilesChange={setAutoOtherFiles} /></div><div className="grid gap-4 sm:grid-cols-3"><NumberField name="goodCount" label="Số bài Nhạc hay" value={3} min={0} max={50} /><NumberField name="otherCount" label="Số bài Nhạc khác" value={2} min={0} max={50} /><NumberField name="outputCount" label="Số playlist xuất" value={1} min={1} max={20} /></div><p className="text-sm text-muted-foreground">Mỗi playlist được random độc lập, không lặp bài trong cùng playlist và tự xuất kèm Tracks List TXT.</p><SubmitButton busy={activeJob === "auto-mp3"} disabled={!status?.available || activeJob !== null || autoGoodFiles.length + autoOtherFiles.length < 2} label="Tạo Auto MP3" icon={<Music2 />} /></form></ToolCard>}
-					{selectedTool === "auto-video" && <ToolCard title="Auto Video" description="Random thứ tự nhiều video, nối và lặp cả chuỗi cho đủ thời lượng audio." icon={<Clapperboard />}><form className="space-y-5" onSubmit={handleAutoVideo}><FileField inputRef={autoVideoAudioInput} name="audio" label="Audio chính" accept="audio/*" icon={<Music2 />} /><MultiMediaField inputRef={backgroundsInput} /><SelectField id="auto-resolution" name="resolution" label="Độ phân giải" options={[{ value: "1080p", label: "Full HD · 1920×1080" }, { value: "4k", label: "4K · 3840×2160" }]} /><p className="text-sm text-muted-foreground">Tất cả video hợp lệ được xáo trộn và nối lại. Nếu tổng thời lượng ngắn hơn audio, toàn bộ chuỗi video được lặp lại rồi cắt vừa audio.</p><SubmitButton busy={activeJob === "auto-video"} disabled={!status?.available || activeJob !== null} label="Render Auto Video" icon={<Clapperboard />} /></form></ToolCard>}
+					{selectedTool === "auto-video" && <ToolCard title="Auto Video" description="Random thứ tự nhiều video, nối và lặp cả chuỗi cho đủ thời lượng audio." icon={<Clapperboard />}><form className="space-y-5" onSubmit={desktopMode ? handleDesktopAutoVideo : handleAutoVideo}>{desktopMode ? <div className="grid gap-4 sm:grid-cols-2"><DesktopPathField label="Audio chính" value={desktopAudioPath} action="Chọn audio" onChoose={chooseDesktopAudio} icon={<Music2 />} /><DesktopPathField label="Thư mục video nền" value={desktopVideoFolder} detail={desktopVideoPaths.length ? `${desktopVideoPaths.length} video · đọc trực tiếp từ ổ đĩa` : undefined} action="Chọn thư mục" onChoose={chooseDesktopVideoFolder} icon={<Clapperboard />} /></div> : <><FileField inputRef={autoVideoAudioInput} name="audio" label="Audio chính" accept="audio/*" icon={<Music2 />} /><MultiMediaField inputRef={backgroundsInput} /></>}<SelectField id="auto-resolution" name="resolution" label="Độ phân giải" options={[{ value: "1080p", label: "Full HD · 1920×1080" }, { value: "4k", label: "4K · 3840×2160" }]} /><p className="text-sm text-muted-foreground">{desktopMode ? "Chế độ Desktop: FFmpeg đọc trực tiếp đường dẫn, không upload và không giới hạn 1,5 GB." : "Tất cả video hợp lệ được xáo trộn và nối lại. Nếu tổng thời lượng ngắn hơn audio, toàn bộ chuỗi video được lặp lại rồi cắt vừa audio."}</p><SubmitButton busy={activeJob === "auto-video"} disabled={activeJob !== null || (desktopMode ? !desktopAudioPath || desktopVideoPaths.length === 0 : !status?.available)} label="Render Auto Video" icon={<Clapperboard />} /></form></ToolCard>}
 					{selectedTool === "image-audio" && <ToolCard title="Ảnh + Audio → MP4" description="Tạo video từ một ảnh tĩnh và một bản audio." icon={<WandSparkles />}><form className="space-y-5" onSubmit={handleImageAudio}><div className="grid gap-4 sm:grid-cols-2"><FileField inputRef={imageInput} name="image" label="Ảnh nền" accept="image/jpeg,image/png,image/webp,image/bmp" icon={<ImageIcon />} /><FileField inputRef={audioInput} name="audio" label="Audio" accept="audio/*" icon={<Music2 />} /></div><SelectField id="resolution" name="resolution" label="Độ phân giải" options={[{ value: "1080p", label: "Full HD · 1920×1080" }, { value: "4k", label: "4K · 3840×2160" }]} /><p className="text-sm text-muted-foreground">Giữ đúng tỷ lệ ảnh và kết thúc theo độ dài audio.</p><SubmitButton busy={activeJob === "image-audio"} disabled={!status?.available || activeJob !== null} label="Bắt đầu render" icon={<WandSparkles />} /></form></ToolCard>}
 
 					{selectedTool === "convert" && <ToolCard title="Convert Media" description="Chuyển đổi video hoặc audio sang định dạng phổ biến." icon={<FileCog />}><form className="space-y-5" onSubmit={handleConvert}><FileField inputRef={convertInput} name="file" label="Video hoặc audio" accept="audio/*,video/*" icon={<FileCog />} /><SelectField id="convert-format" name="format" label="Định dạng đầu ra" options={[{ value: "mp3", label: "MP3 · 320 kbps" }, { value: "wav", label: "WAV · PCM 44.1 kHz" }, { value: "mp4", label: "MP4 · H.264/AAC" }]} /><SubmitButton busy={activeJob === "convert"} disabled={!status?.available || activeJob !== null} label="Chuyển đổi" icon={<FileCog />} /></form></ToolCard>}
@@ -262,7 +301,7 @@ export default function AutomationPage() {
 					{selectedTool === "join-audio" && <ToolCard title="Ghép / Random MP3" description="Sắp xếp vị trí và ghép 2–50 file thành playlist MP3 320 kbps." icon={<ListMusic />}><form className="space-y-5" onSubmit={handleJoinAudio}><MultiFileField inputRef={joinAudioInput} files={joinAudioFiles} onFilesChange={(files) => setJoinAudioFiles((current) => mergeAudioFiles({ current, additions: files }))} /><PlaylistEditor files={joinAudioFiles} pinnedFiles={pinnedAudioFiles} durations={audioDurations} onMove={moveAudio} onMoveTop={moveAudioToTop} onTogglePin={togglePinnedAudio} onRemove={(index) => { const file = joinAudioFiles[index]; setJoinAudioFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)); setPinnedAudioFiles((current) => current.filter((item) => item !== file)); }} onClear={() => { setJoinAudioFiles([]); setPinnedAudioFiles([]); }} onShuffle={shuffleAudio} /><label className="flex items-center gap-3 rounded-md border p-3 text-sm"><input type="checkbox" name="exportTracks" value="true" defaultChecked /> Xuất Tracks List (.txt) theo thứ tự danh sách hiện tại</label><SubmitButton busy={activeJob === "join-audio"} disabled={!status?.available || activeJob !== null || joinAudioFiles.length < 2 || joinAudioFiles.some((file) => audioDurations[audioFileKey(file)] === undefined)} label="Tạo playlist MP3" icon={<Music2 />} /></form></ToolCard>}
 				</section>
 
-				<aside className="h-fit rounded-lg border bg-background lg:sticky lg:top-4"><div className="border-b px-4 py-3"><h2 className="font-semibold">Kết quả</h2><p className="text-xs text-muted-foreground">{jobs.length} file trong phiên này</p></div><div className="max-h-[calc(100vh-7rem)] space-y-2 overflow-y-auto p-3">{jobs.length === 0 ? <div className="rounded-md border border-dashed p-6 text-center"><Download className="mx-auto mb-2 size-5 text-muted-foreground" /><p className="text-sm text-muted-foreground">Chưa có file kết quả</p></div> : jobs.map((job) => <div key={job.id} className="flex items-center gap-3 rounded-md border p-3"><CheckCircle2 className="size-5 shrink-0 text-green-500" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{job.filename}</p><p className="text-xs text-muted-foreground">{job.createdAt.toLocaleTimeString("vi-VN")}</p></div><Button asChild variant="outline" size="icon"><a href={job.url} download={job.filename} aria-label="Tải file"><Download /></a></Button></div>)}</div></aside>
+				<aside className="h-fit rounded-lg border bg-background lg:sticky lg:top-4"><div className="border-b px-4 py-3"><h2 className="font-semibold">Kết quả</h2><p className="text-xs text-muted-foreground">{jobs.length} file trong phiên này</p></div><div className="max-h-[calc(100vh-7rem)] space-y-2 overflow-y-auto p-3">{jobs.length === 0 ? <div className="rounded-md border border-dashed p-6 text-center"><Download className="mx-auto mb-2 size-5 text-muted-foreground" /><p className="text-sm text-muted-foreground">Chưa có file kết quả</p></div> : jobs.map((job) => <div key={job.id} className="flex items-center gap-3 rounded-md border p-3"><CheckCircle2 className="size-5 shrink-0 text-green-500" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{job.filename}</p><p className="text-xs text-muted-foreground">{job.url ? job.createdAt.toLocaleTimeString("vi-VN") : `Đã lưu · ${job.createdAt.toLocaleTimeString("vi-VN")}`}</p></div>{job.url && <Button asChild variant="outline" size="icon"><a href={job.url} download={job.filename} aria-label="Tải file"><Download /></a></Button>}</div>)}</div></aside>
 			</div>
 		</main>
 	);
@@ -310,6 +349,10 @@ function FileField({ inputRef, name, label, accept, icon }: { inputRef: RefObjec
 
 function MultiFileField({ inputRef, files, onFilesChange }: { inputRef: RefObject<HTMLInputElement | null>; files: File[]; onFilesChange: (files: File[]) => void }) {
 	return <label className={`flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed p-5 text-center transition hover:bg-accent ${files.length ? "border-foreground/40 bg-accent/30" : ""}`}><ListMusic className="size-6 text-muted-foreground" /><span className="text-sm font-medium">{files.length ? "Chọn thêm file audio" : "Chọn 2–50 file audio"}</span><span className="text-xs text-muted-foreground">{files.length ? `Đang có ${files.length}/50 file · file mới sẽ được thêm vào cuối` : "MP3, WAV, M4A, AAC, OGG, FLAC"}</span><input ref={inputRef} className="sr-only" type="file" name="files-picker" accept="audio/*" multiple onChange={(event) => { onFilesChange(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} /></label>;
+}
+
+function DesktopPathField({ label, value, detail, action, onChoose, icon }: { label: string; value: string; detail?: string; action: string; onChoose: () => void; icon: ReactNode }) {
+	return <div className={`flex min-h-36 flex-col items-center justify-center gap-2 rounded-md border border-dashed p-5 text-center ${value ? "border-foreground/40 bg-accent/30" : ""}`}><span className="text-muted-foreground [&_svg]:size-6">{icon}</span><span className="text-sm font-medium">{label}</span><span className="max-w-full truncate text-xs text-muted-foreground">{detail ?? (value || "Chưa chọn")}</span><Button type="button" variant="outline" size="sm" onClick={onChoose}>{action}</Button></div>;
 }
 
 function mergeAudioFiles({ current, additions }: { current: File[]; additions: File[] }) {
