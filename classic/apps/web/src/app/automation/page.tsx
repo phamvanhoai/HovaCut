@@ -98,11 +98,11 @@ export default function AutomationPage() {
 				}
 				return response.blob();
 			})
-			.then((blob) => {
+			.then(async (blob) => {
 				const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 				addCompletedJob({ blob, filename: `hovacut-playlist-${timestamp}.mp3` });
 				if (exportTracks) {
-					const tracks = joinAudioFiles.map((file) => stripAudioExtension(file.name)).join("\r\n");
+					const tracks = await createCgtTracksList(joinAudioFiles);
 					addCompletedJob({ blob: new Blob([tracks], { type: "text/plain;charset=utf-8" }), filename: `hovacut-tracks-${timestamp}.txt` });
 				}
 			})
@@ -227,6 +227,39 @@ function formatFileSize(bytes: number) {
 
 function stripAudioExtension(filename: string) {
 	return filename.replace(/\.(mp3|wav|m4a|aac|ogg|flac|opus|wma)$/i, "");
+}
+
+async function createCgtTracksList(files: File[]) {
+	let elapsedSeconds = 0;
+	const lines: string[] = [];
+	for (const file of files) {
+		lines.push(`${formatTrackTime(elapsedSeconds)} ${stripAudioExtension(file.name)}`);
+		elapsedSeconds += await readAudioDuration(file);
+	}
+	return lines.join("\r\n");
+}
+
+function readAudioDuration(file: File) {
+	return new Promise<number>((resolve) => {
+		const url = URL.createObjectURL(file);
+		const audio = document.createElement("audio");
+		const finish = (duration: number) => {
+			URL.revokeObjectURL(url);
+			audio.removeAttribute("src");
+			resolve(Number.isFinite(duration) ? duration : 0);
+		};
+		audio.preload = "metadata";
+		audio.onloadedmetadata = () => finish(audio.duration);
+		audio.onerror = () => finish(0);
+		audio.src = url;
+	});
+}
+
+function formatTrackTime(totalSeconds: number) {
+	const seconds = Math.max(0, Math.floor(totalSeconds));
+	const hours = Math.floor(seconds / 3600);
+	const minutes = Math.floor((seconds % 3600) / 60);
+	return [hours, minutes, seconds % 60].map((value) => String(value).padStart(2, "0")).join(":");
 }
 
 function MultiMediaField({ inputRef }: { inputRef: RefObject<HTMLInputElement | null> }) {
