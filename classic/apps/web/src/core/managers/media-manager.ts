@@ -50,6 +50,32 @@ export class MediaManager {
 		}
 	}
 
+	async relinkMediaAsset({
+		projectId,
+		id,
+		asset,
+	}: {
+		projectId: string;
+		id: string;
+		asset: Omit<MediaAsset, "id">;
+	}): Promise<void> {
+		const current = this.assets.find((item) => item.id === id);
+		if (!current) throw new Error("Media không tồn tại trong project.");
+		if (current.type !== asset.type) {
+			throw new Error("File thay thế phải cùng loại video, ảnh hoặc âm thanh.");
+		}
+		const replacement: MediaAsset = { ...asset, id };
+		await storageService.saveMediaAsset({ projectId, mediaAsset: replacement });
+		if (current.url?.startsWith("blob:")) URL.revokeObjectURL(current.url);
+		this.assets = this.assets.map((item) =>
+			item.id === id ? replacement : item,
+		);
+		videoCache.clearVideo({ mediaId: id });
+		waveformCache.clearAll();
+		this.notify();
+		this.editor.save.markDirty();
+	}
+
 	removeMediaAsset({ projectId, id }: { projectId: string; id: string }): void {
 		this.removeMediaAssets({ projectId, ids: [id] });
 	}
@@ -73,11 +99,12 @@ export class MediaManager {
 						assetId: uniqueIds[0],
 					})
 				: new BatchCommand(
-						uniqueIds.map((id) =>
-							new RemoveMediaAssetCommand({
-								projectId,
-								assetId: id,
-							}),
+						uniqueIds.map(
+							(id) =>
+								new RemoveMediaAssetCommand({
+									projectId,
+									assetId: id,
+								}),
 						),
 					);
 

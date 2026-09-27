@@ -382,15 +382,68 @@ function MediaItemWithContextMenu({
 		ids: string[];
 	}) => void;
 }) {
+	const editor = useEditor();
+	const activeProject = useEditor((core) => core.project.getActive());
 	const { isSelected, selectedIds } = useSelection();
 	const idsToDelete = isSelected(item.id) ? selectedIds : [item.id];
 	const deleteLabel =
 		idsToDelete.length > 1 ? `Delete ${idsToDelete.length} items` : "Delete";
 
+	const handleRelink = async () => {
+		if (!window.__TAURI__) return;
+		const selected = await window.__TAURI__.dialog.open({
+			multiple: false,
+			directory: false,
+			filters: [
+				{
+					name: "Media thay thế",
+					extensions:
+						item.type === "video"
+							? ["mp4", "mov", "mkv", "webm", "avi", "m4v"]
+							: item.type === "audio"
+								? ["mp3", "wav", "m4a", "aac", "ogg", "flac", "opus"]
+								: ["png", "jpg", "jpeg", "webp", "gif", "svg"],
+				},
+			],
+		});
+		if (typeof selected !== "string") return;
+		try {
+			const name = selected.split(/[\\/]/).pop() ?? item.name;
+			const response = await fetch(
+				window.__TAURI__.core.convertFileSrc(selected),
+			);
+			if (!response.ok) throw new Error("Không đọc được file thay thế.");
+			const blob = await response.blob();
+			const file = new File([blob], name, {
+				type: getMimeTypeFromName({ name }),
+			});
+			const [processed] = await processMediaAssets({
+				files: [file],
+				sourcePaths: [selected],
+			});
+			if (!processed) throw new Error("Không thể xử lý file thay thế.");
+			await editor.media.relinkMediaAsset({
+				projectId: activeProject.metadata.id,
+				id: item.id,
+				asset: processed,
+			});
+			toast.success("Đã liên kết lại media", { description: selected });
+		} catch (error) {
+			toast.error("Relink media thất bại", {
+				description: error instanceof Error ? error.message : "Có lỗi xảy ra",
+			});
+		}
+	};
+
 	return (
 		<ContextMenu>
 			<ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
 			<ContextMenuContent>
+				{typeof window !== "undefined" && window.__TAURI__ ? (
+					<ContextMenuItem onClick={handleRelink}>
+						Relink file...
+					</ContextMenuItem>
+				) : null}
 				<ContextMenuItem>Export clips</ContextMenuItem>
 				<ContextMenuItem
 					variant="destructive"
