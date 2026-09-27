@@ -24,6 +24,13 @@ import {
 import type { Bookmark, SceneTracks, TScene } from "@/timeline";
 import { roundMediaTime } from "@/wasm";
 
+type DesktopWindow = Window & { __TAURI__?: { core: { invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T> } } };
+
+function desktopInvoke<T>({ command, args }: { command: string; args: Record<string, unknown> }) {
+	if (typeof window === "undefined") return null;
+	return (window as DesktopWindow).__TAURI__?.core.invoke<T>(command, args) ?? null;
+}
+
 function normalizeBookmarks({ raw }: { raw: unknown }): Bookmark[] {
 	if (!Array.isArray(raw)) return [];
 	return raw
@@ -165,6 +172,11 @@ class StorageService {
 			key: project.metadata.id,
 			value: serializedProject,
 		});
+		try {
+			await desktopInvoke({ command: "save_project_json", args: { projectId: project.metadata.id, project: serializedProject } });
+		} catch (error) {
+			console.error("Failed to mirror project to desktop storage:", error);
+		}
 	}
 
 	async loadProject({
@@ -173,7 +185,15 @@ class StorageService {
 		id: string;
 	}): Promise<{ project: TProject } | null> {
 		await this.ensureMigrations();
-		const serializedProject = await this.projectsAdapter.get(id);
+		let serializedProject = await this.projectsAdapter.get(id);
+		if (!serializedProject) {
+			try {
+				serializedProject = await desktopInvoke<SerializedProject | null>({ command: "load_project_json", args: { projectId: id } });
+				if (serializedProject) await this.projectsAdapter.set({ key: id, value: serializedProject });
+			} catch (error) {
+				console.error("Failed to restore project from desktop storage:", error);
+			}
+		}
 
 		if (!serializedProject) return null;
 
@@ -282,6 +302,11 @@ class StorageService {
 
 	async deleteProject({ id }: { id: string }): Promise<void> {
 		await this.projectsAdapter.remove(id);
+		try {
+			await desktopInvoke({ command: "delete_project_json", args: { projectId: id } });
+		} catch (error) {
+			console.error("Failed to delete desktop project file:", error);
+		}
 	}
 
 	async saveMediaAsset({

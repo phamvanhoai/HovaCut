@@ -1,3 +1,4 @@
+use serde_json::Value;
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -32,6 +33,42 @@ fn list_media_files(directory: String, extensions: Vec<String>) -> Result<Vec<St
     }
     files.sort();
     Ok(files)
+}
+
+fn projects_directory() -> Result<PathBuf, String> {
+    let root = env::var("APPDATA").map_err(|_| "Không tìm thấy thư mục AppData.".to_string())?;
+    let directory = PathBuf::from(root).join("HovaCut").join("projects");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory)
+}
+
+#[tauri::command]
+fn save_project_json(project_id: String, project: Value) -> Result<String, String> {
+    let path = projects_directory()?.join(format!("{project_id}.hovacut.json"));
+    let content = serde_json::to_vec_pretty(&project).map_err(|error| error.to_string())?;
+    fs::write(&path, content).map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn load_project_json(project_id: String) -> Result<Option<Value>, String> {
+    let path = projects_directory()?.join(format!("{project_id}.hovacut.json"));
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let content = fs::read(path).map_err(|error| error.to_string())?;
+    serde_json::from_slice(&content)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn delete_project_json(project_id: String) -> Result<(), String> {
+    let path = projects_directory()?.join(format!("{project_id}.hovacut.json"));
+    if path.is_file() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn ffmpeg_path() -> PathBuf {
@@ -459,6 +496,9 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_media_files,
+            save_project_json,
+            load_project_json,
+            delete_project_json,
             detect_video_encoders,
             render_auto_video,
             render_auto_mp3,
