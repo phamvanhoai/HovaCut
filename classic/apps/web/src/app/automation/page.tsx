@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, ChevronsUp, CircleAlert, Clapperboard, Download, FileCog, ImageIcon, ListMusic, LoaderCircle, Music2, Pin, PinOff, Shuffle, Trash2, WandSparkles } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, ChevronsUp, CircleAlert, Clapperboard, Download, FileCog, FileText, ImageIcon, ListMusic, LoaderCircle, Music2, Pin, PinOff, Shuffle, Trash2, Upload, WandSparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -26,11 +26,14 @@ export default function AutomationPage() {
 	const [jobs, setJobs] = useState<CompletedJob[]>([]);
 	const [joinAudioFiles, setJoinAudioFiles] = useState<File[]>([]);
 	const [pinnedAudioFiles, setPinnedAudioFiles] = useState<File[]>([]);
+	const [playlistText, setPlaylistText] = useState("");
+	const [playlistNotice, setPlaylistNotice] = useState<string | null>(null);
 	const objectUrls = useRef<string[]>([]);
 	const imageInput = useRef<HTMLInputElement>(null);
 	const audioInput = useRef<HTMLInputElement>(null);
 	const convertInput = useRef<HTMLInputElement>(null);
 	const joinAudioInput = useRef<HTMLInputElement>(null);
+	const playlistTextInput = useRef<HTMLInputElement>(null);
 	const autoVideoAudioInput = useRef<HTMLInputElement>(null);
 	const backgroundsInput = useRef<HTMLInputElement>(null);
 
@@ -143,6 +146,44 @@ export default function AutomationPage() {
 		setPinnedAudioFiles((current) => [file, ...current.filter((item) => item !== file)]);
 		setJoinAudioFiles((current) => [file, ...current.filter((item) => item !== file)]);
 	};
+	const applyPlaylistText = (text = playlistText) => {
+		const names = parsePlaylistNames(text);
+		if (names.length === 0) {
+			setPlaylistNotice("Playlist TXT chưa có tên voice nào.");
+			return;
+		}
+		const remaining = [...joinAudioFiles];
+		const ordered: File[] = [];
+		const missing: string[] = [];
+		for (const name of names) {
+			const normalizedName = normalizePlaylistName(name);
+			const index = remaining.findIndex((file) => {
+				const normalizedFile = normalizePlaylistName(file.name);
+				return normalizedFile === normalizedName || stripFileExtension(normalizedFile) === stripFileExtension(normalizedName);
+			});
+			if (index < 0) missing.push(name);
+			else ordered.push(...remaining.splice(index, 1));
+		}
+		setJoinAudioFiles([...ordered, ...remaining]);
+		setPinnedAudioFiles([]);
+		setPlaylistNotice(`${ordered.length}/${names.length} dòng đã khớp${remaining.length ? ` · ${remaining.length} file không có trong TXT được giữ ở cuối` : ""}${missing.length ? ` · Không tìm thấy: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}` : ""}`);
+	};
+	const importPlaylistText = async (file?: File) => {
+		if (!file) return;
+		const text = await file.text();
+		setPlaylistText(text);
+		applyPlaylistText(text);
+	};
+	const exportPlaylistText = () => {
+		if (joinAudioFiles.length === 0) return;
+		const blob = new Blob([joinAudioFiles.map((file) => file.name).join("\r\n")], { type: "text/plain;charset=utf-8" });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = "hovacut-playlist.txt";
+		link.click();
+		URL.revokeObjectURL(url);
+	};
 	const handleAutoVideo = (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (!autoVideoAudioInput.current?.files?.[0] || !(backgroundsInput.current?.files?.length)) return setError("Chọn audio và ít nhất một video nền.");
@@ -172,7 +213,7 @@ export default function AutomationPage() {
 
 					{selectedTool === "convert" && <ToolCard title="Convert Media" description="Chuyển đổi video hoặc audio sang định dạng phổ biến." icon={<FileCog />}><form className="space-y-5" onSubmit={handleConvert}><FileField inputRef={convertInput} name="file" label="Video hoặc audio" accept="audio/*,video/*" icon={<FileCog />} /><SelectField id="convert-format" name="format" label="Định dạng đầu ra" options={[{ value: "mp3", label: "MP3 · 320 kbps" }, { value: "wav", label: "WAV · PCM 44.1 kHz" }, { value: "mp4", label: "MP4 · H.264/AAC" }]} /><SubmitButton busy={activeJob === "convert"} disabled={!status?.available || activeJob !== null} label="Chuyển đổi" icon={<FileCog />} /></form></ToolCard>}
 
-					{selectedTool === "join-audio" && <ToolCard title="Ghép / Random MP3" description="Sắp xếp vị trí và ghép 2–50 file thành playlist MP3 320 kbps." icon={<ListMusic />}><form className="space-y-5" onSubmit={handleJoinAudio}><MultiFileField inputRef={joinAudioInput} files={joinAudioFiles} onFilesChange={(files) => { setJoinAudioFiles(files); setPinnedAudioFiles([]); }} /><PlaylistEditor files={joinAudioFiles} pinnedFiles={pinnedAudioFiles} onMove={moveAudio} onMoveTop={moveAudioToTop} onTogglePin={togglePinnedAudio} onRemove={(index) => { const file = joinAudioFiles[index]; setJoinAudioFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)); setPinnedAudioFiles((current) => current.filter((item) => item !== file)); }} onShuffle={shuffleAudio} /><label className="flex items-center gap-3 rounded-md border p-3 text-sm"><input type="checkbox" name="random" value="true" /><Shuffle className="size-4" /> Random lại một lần nữa trên server trước khi ghép</label><SubmitButton busy={activeJob === "join-audio"} disabled={!status?.available || activeJob !== null || joinAudioFiles.length < 2} label="Tạo playlist MP3" icon={<Music2 />} /></form></ToolCard>}
+					{selectedTool === "join-audio" && <ToolCard title="Ghép / Random MP3" description="Sắp xếp vị trí và ghép 2–50 file thành playlist MP3 320 kbps." icon={<ListMusic />}><form className="space-y-5" onSubmit={handleJoinAudio}><MultiFileField inputRef={joinAudioInput} files={joinAudioFiles} onFilesChange={(files) => { setJoinAudioFiles(files); setPinnedAudioFiles([]); setPlaylistNotice(null); }} /><PlaylistTextEditor text={playlistText} notice={playlistNotice} inputRef={playlistTextInput} disabled={joinAudioFiles.length === 0} onTextChange={setPlaylistText} onImport={importPlaylistText} onApply={() => applyPlaylistText()} onExport={exportPlaylistText} /><PlaylistEditor files={joinAudioFiles} pinnedFiles={pinnedAudioFiles} onMove={moveAudio} onMoveTop={moveAudioToTop} onTogglePin={togglePinnedAudio} onRemove={(index) => { const file = joinAudioFiles[index]; setJoinAudioFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)); setPinnedAudioFiles((current) => current.filter((item) => item !== file)); }} onShuffle={shuffleAudio} /><label className="flex items-center gap-3 rounded-md border p-3 text-sm"><input type="checkbox" name="random" value="true" /><Shuffle className="size-4" /> Random lại một lần nữa trên server trước khi ghép</label><SubmitButton busy={activeJob === "join-audio"} disabled={!status?.available || activeJob !== null || joinAudioFiles.length < 2} label="Tạo playlist MP3" icon={<Music2 />} /></form></ToolCard>}
 				</section>
 
 				<aside className="h-fit rounded-lg border bg-background lg:sticky lg:top-4"><div className="border-b px-4 py-3"><h2 className="font-semibold">Kết quả</h2><p className="text-xs text-muted-foreground">{jobs.length} file trong phiên này</p></div><div className="max-h-[calc(100vh-7rem)] space-y-2 overflow-y-auto p-3">{jobs.length === 0 ? <div className="rounded-md border border-dashed p-6 text-center"><Download className="mx-auto mb-2 size-5 text-muted-foreground" /><p className="text-sm text-muted-foreground">Chưa có file kết quả</p></div> : jobs.map((job) => <div key={job.id} className="flex items-center gap-3 rounded-md border p-3"><CheckCircle2 className="size-5 shrink-0 text-green-500" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{job.filename}</p><p className="text-xs text-muted-foreground">{job.createdAt.toLocaleTimeString("vi-VN")}</p></div><Button asChild variant="outline" size="icon"><a href={job.url} download={job.filename} aria-label="Tải file"><Download /></a></Button></div>)}</div></aside>
@@ -206,6 +247,22 @@ function FileField({ inputRef, name, label, accept, icon }: { inputRef: RefObjec
 
 function MultiFileField({ inputRef, files, onFilesChange }: { inputRef: RefObject<HTMLInputElement | null>; files: File[]; onFilesChange: (files: File[]) => void }) {
 	return <label className={`flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed p-5 text-center transition hover:bg-accent ${files.length ? "border-foreground/40 bg-accent/30" : ""}`}><ListMusic className="size-6 text-muted-foreground" /><span className="text-sm font-medium">Chọn 2–50 file audio</span><span className="text-xs text-muted-foreground">{files.length ? `Đã chọn ${files.length} file` : "MP3, WAV, M4A, AAC, OGG, FLAC"}</span><input ref={inputRef} className="sr-only" type="file" name="files-picker" accept="audio/*" multiple onChange={(event) => onFilesChange(Array.from(event.target.files ?? []).slice(0, 50))} /></label>;
+}
+
+function PlaylistTextEditor({ text, notice, inputRef, disabled, onTextChange, onImport, onApply, onExport }: { text: string; notice: string | null; inputRef: RefObject<HTMLInputElement | null>; disabled: boolean; onTextChange: (text: string) => void; onImport: (file?: File) => void; onApply: () => void; onExport: () => void }) {
+	return <div className="rounded-md border"><div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2"><div><p className="flex items-center gap-2 text-sm font-medium"><FileText className="size-4" /> Playlist TXT · tên voice</p><p className="text-xs text-muted-foreground">Mỗi dòng một tên file, có thể có hoặc không có đuôi audio</p></div><div className="flex gap-2"><Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()}><Upload /> Chọn TXT</Button><Button type="button" variant="outline" size="sm" disabled={disabled} onClick={onExport}><Download /> Xuất TXT</Button><input ref={inputRef} className="sr-only" type="file" accept=".txt,text/plain" onChange={(event) => { void onImport(event.target.files?.[0]); event.currentTarget.value = ""; }} /></div></div><div className="space-y-3 p-3"><textarea value={text} onChange={(event) => onTextChange(event.target.value)} rows={7} placeholder={"voice_mo_dau.mp3\nvoice_noi_dung_01\nvoice_ket_thuc.wav"} className="w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring" /><Button type="button" variant="secondary" className="w-full" disabled={disabled || parsePlaylistNames(text).length === 0} onClick={onApply}><ListMusic /> Áp dụng thứ tự từ TXT</Button>{notice && <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">{notice}</p>}</div></div>;
+}
+
+function parsePlaylistNames(text: string) {
+	return text.split(/\r?\n/).map((line) => line.trim().replace(/^\s*(?:\d+[.)-]|[-*])\s*/, "").replace(/^['"]|['"]$/g, "").trim()).filter(Boolean);
+}
+
+function normalizePlaylistName(name: string) {
+	return name.replace(/\\/g, "/").split("/").pop()?.normalize("NFC").trim().toLocaleLowerCase("vi-VN") ?? "";
+}
+
+function stripFileExtension(name: string) {
+	return name.replace(/\.(mp3|wav|m4a|aac|ogg|flac|opus|wma)$/i, "");
 }
 
 function PlaylistEditor({ files, pinnedFiles, onMove, onMoveTop, onTogglePin, onRemove, onShuffle }: { files: File[]; pinnedFiles: File[]; onMove: (options: { index: number; direction: -1 | 1 }) => void; onMoveTop: (index: number) => void; onTogglePin: (file: File) => void; onRemove: (index: number) => void; onShuffle: () => void }) {
