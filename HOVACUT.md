@@ -17,6 +17,14 @@ From PowerShell at the repository root:
 
 Open <http://localhost:3000>. Docker is optional for the editor UI; account, database, and Redis features require the services documented in `classic/README.md`.
 
+The first local automation workflow is available at <http://localhost:3000/automation>:
+
+- image + audio to H.264/AAC MP4;
+- Full HD and 4K presets;
+- FFmpeg availability check and downloadable completed jobs.
+
+The PowerShell launcher enables the local-only API and uses `E:\CGT Auto Tools v1.3.0\ffmpeg.exe` when present. Override `HOVACUT_FFMPEG_PATH` before launching to select another build. The execution API stays disabled on normal public deployments.
+
 ## Run the rewrite
 
 ```powershell

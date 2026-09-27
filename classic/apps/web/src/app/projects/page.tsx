@@ -184,6 +184,9 @@ function ProjectsHeader() {
 
 				<div className="flex items-center gap-3 md:gap-4">
 					<SearchBar className="hidden md:block" />
+					<Button asChild variant="outline" size="lg">
+						<Link href="/automation">Automation</Link>
+					</Button>
 					<NewProjectButton />
 				</div>
 			</div>
