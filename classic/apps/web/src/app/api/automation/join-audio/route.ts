@@ -6,13 +6,14 @@ import { fileResponse, MAX_MEDIA_BYTES, saveUpload, withJobDirectory } from "@/a
 export const runtime = "nodejs";
 const MAX_FILES = 50;
 
-function shuffle<T>(items: T[]) {
-	const result = [...items];
+function shuffle<T>({ items, fixedPrefix }: { items: T[]; fixedPrefix: number }) {
+	const pinned = items.slice(0, fixedPrefix);
+	const result = items.slice(fixedPrefix);
 	for (let index = result.length - 1; index > 0; index--) {
 		const swap = Math.floor(Math.random() * (index + 1));
 		[result[index], result[swap]] = [result[swap], result[index]];
 	}
-	return result;
+	return [...pinned, ...result];
 }
 
 export async function POST(request: Request) {
@@ -23,7 +24,9 @@ export async function POST(request: Request) {
 	if (files.length < 2) return NextResponse.json({ error: "Select at least two audio files." }, { status: 400 });
 	if (files.length > MAX_FILES) return NextResponse.json({ error: `A maximum of ${MAX_FILES} files is allowed.` }, { status: 400 });
 	if (files.some((file) => file.size > MAX_MEDIA_BYTES)) return NextResponse.json({ error: "Each audio file must be 500 MB or smaller." }, { status: 400 });
-	if (form.get("random") === "true") files = shuffle(files);
+	const requestedPinnedCount = Number(form.get("pinnedCount"));
+	const pinnedCount = Number.isFinite(requestedPinnedCount) ? Math.max(0, Math.min(files.length, Math.floor(requestedPinnedCount))) : 0;
+	if (form.get("random") === "true") files = shuffle({ items: files, fixedPrefix: pinnedCount });
 
 	try {
 		return await withJobDirectory({ prefix: "hovacut-join-audio-", run: async (directory) => {
