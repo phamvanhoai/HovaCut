@@ -311,6 +311,95 @@ fn render_join_audio(
     Ok(outputs)
 }
 
+#[tauri::command]
+fn convert_media(
+    input_path: String,
+    output_path: String,
+    format: String,
+) -> Result<String, String> {
+    if !Path::new(&input_path).is_file() {
+        return Err("File đầu vào không tồn tại.".into());
+    }
+    let mut args = vec!["-y", "-i", &input_path];
+    match format.as_str() {
+        "wav" => args.extend(["-vn", "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le"]),
+        "mp4" => args.extend([
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+        ]),
+        _ => args.extend(["-vn", "-c:a", "libmp3lame", "-b:a", "320k"]),
+    }
+    args.push(&output_path);
+    let output = Command::new(ffmpeg_path())
+        .args(args)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    Ok(output_path)
+}
+
+#[tauri::command]
+fn render_image_audio(
+    image_path: String,
+    audio_path: String,
+    output_path: String,
+    resolution: String,
+) -> Result<String, String> {
+    if !Path::new(&image_path).is_file() || !Path::new(&audio_path).is_file() {
+        return Err("Ảnh hoặc audio không tồn tại.".into());
+    }
+    let (width, height) = if resolution == "4k" {
+        (3840, 2160)
+    } else {
+        (1920, 1080)
+    };
+    let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p");
+    let output = Command::new(ffmpeg_path())
+        .args([
+            "-y",
+            "-loop",
+            "1",
+            "-i",
+            &image_path,
+            "-i",
+            &audio_path,
+            "-vf",
+            &filter,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "stillimage",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            "-fflags",
+            "+shortest",
+            "-movflags",
+            "+faststart",
+            &output_path,
+        ])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    Ok(output_path)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -318,7 +407,9 @@ fn main() {
             list_media_files,
             render_auto_video,
             render_auto_mp3,
-            render_join_audio
+            render_join_audio,
+            convert_media,
+            render_image_audio
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động HovaCut Desktop");
