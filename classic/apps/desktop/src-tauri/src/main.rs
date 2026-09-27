@@ -97,8 +97,19 @@ fn project_id_from_json(project: &Value) -> Result<String, String> {
 #[tauri::command]
 fn import_project_json(input_path: String) -> Result<Value, String> {
     let content = fs::read(&input_path).map_err(|error| error.to_string())?;
-    let project: Value = serde_json::from_slice(&content)
+    let mut project: Value = serde_json::from_slice(&content)
         .map_err(|error| format!("File project không phải JSON hợp lệ: {error}"))?;
+    if let Some(media) = project.get_mut("desktopMedia").and_then(Value::as_array_mut) {
+        let base = Path::new(&input_path).parent().unwrap_or_else(|| Path::new("."));
+        for item in media {
+            if let Some(relative) = item.get("sourcePath").and_then(Value::as_str) {
+                let path = PathBuf::from(relative);
+                if path.is_relative() {
+                    item["sourcePath"] = Value::String(base.join(path).to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
     let project_id = project_id_from_json(&project)?;
     let destination = projects_directory()?.join(format!("{project_id}.hovacut.json"));
     let normalized = serde_json::to_vec_pretty(&project).map_err(|error| error.to_string())?;
@@ -107,12 +118,33 @@ fn import_project_json(input_path: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn export_project_json(project_id: String, output_path: String) -> Result<String, String> {
+fn export_project_json(project_id: String, output_path: String, media_assets: Vec<Value>) -> Result<String, String> {
     let source = projects_directory()?.join(format!("{project_id}.hovacut.json"));
     if !source.is_file() {
         return Err("Không tìm thấy dữ liệu project đã lưu.".into());
     }
-    fs::copy(source, &output_path).map_err(|error| error.to_string())?;
+    let content = fs::read(source).map_err(|error| error.to_string())?;
+    let mut project: Value = serde_json::from_slice(&content).map_err(|error| error.to_string())?;
+    let output = PathBuf::from(&output_path);
+    let stem = output.file_stem().and_then(|value| value.to_str()).unwrap_or("hovacut");
+    let media_folder_name = format!("{stem}_media");
+    let media_directory = output.parent().unwrap_or_else(|| Path::new(".")).join(&media_folder_name);
+    fs::create_dir_all(&media_directory).map_err(|error| error.to_string())?;
+    let mut portable_media = Vec::new();
+    for mut media in media_assets {
+        let Some(source_path) = media.get("sourcePath").and_then(Value::as_str) else { continue };
+        let source = PathBuf::from(source_path);
+        if !source.is_file() { continue; }
+        let id = media.get("id").and_then(Value::as_str).unwrap_or("media");
+        let name = source.file_name().and_then(|value| value.to_str()).unwrap_or("asset");
+        let filename = format!("{id}-{name}");
+        fs::copy(&source, media_directory.join(&filename)).map_err(|error| error.to_string())?;
+        media["sourcePath"] = Value::String(format!("{media_folder_name}/{filename}"));
+        portable_media.push(media);
+    }
+    project["desktopMedia"] = Value::Array(portable_media);
+    let normalized = serde_json::to_vec_pretty(&project).map_err(|error| error.to_string())?;
+    fs::write(&output, normalized).map_err(|error| error.to_string())?;
     Ok(output_path)
 }
 

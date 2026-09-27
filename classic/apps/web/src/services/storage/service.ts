@@ -343,7 +343,9 @@ class StorageService {
 	}: {
 		inputPath: string;
 	}): Promise<string> {
-		const serializedProject = await desktopInvoke<SerializedProject>({
+		const serializedProject = await desktopInvoke<
+			SerializedProject & { desktopMedia?: MediaAssetData[] }
+		>({
 			command: "import_project_json",
 			args: { inputPath },
 		});
@@ -354,6 +356,16 @@ class StorageService {
 			key: serializedProject.metadata.id,
 			value: serializedProject,
 		});
+		if (serializedProject.desktopMedia?.length) {
+			const { mediaMetadataAdapter } = this.getProjectMediaAdapters({
+				projectId: serializedProject.metadata.id,
+			});
+			await Promise.all(
+				serializedProject.desktopMedia.map((metadata) =>
+					mediaMetadataAdapter.set({ key: metadata.id, value: metadata }),
+				),
+			);
+		}
 		return serializedProject.metadata.id;
 	}
 
@@ -364,9 +376,13 @@ class StorageService {
 		id: string;
 		outputPath: string;
 	}): Promise<void> {
+		const { mediaMetadataAdapter } = this.getProjectMediaAdapters({
+			projectId: id,
+		});
+		const mediaAssets = await mediaMetadataAdapter.getAll();
 		await desktopInvoke({
 			command: "export_project_json",
-			args: { projectId: id, outputPath },
+			args: { projectId: id, outputPath, mediaAssets },
 		});
 	}
 
