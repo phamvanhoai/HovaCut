@@ -82,9 +82,10 @@ export default function AutomationPage() {
 		event.preventDefault();
 		if (joinAudioFiles.length < 2) return setError("Chọn ít nhất hai file audio.");
 		const form = event.currentTarget;
+		const exportTracks = new FormData(form).get("exportTracks") === "true";
 		const data = new FormData();
 		for (const file of joinAudioFiles) data.append("files", file, file.name);
-		data.set("random", new FormData(form).get("random") === "true" ? "true" : "false");
+		data.set("random", "false");
 		data.set("pinnedCount", String(joinAudioFiles.filter((file) => pinnedAudioFiles.includes(file)).length));
 		setError(null);
 		setActiveJob("join-audio");
@@ -97,7 +98,14 @@ export default function AutomationPage() {
 				}
 				return response.blob();
 			})
-			.then((blob) => addCompletedJob({ blob, filename: `hovacut-playlist-${new Date().toISOString().replace(/[:.]/g, "-")}.mp3` }))
+			.then((blob) => {
+				const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+				addCompletedJob({ blob, filename: `hovacut-playlist-${timestamp}.mp3` });
+				if (exportTracks) {
+					const tracks = joinAudioFiles.map((file) => stripAudioExtension(file.name)).join("\r\n");
+					addCompletedJob({ blob: new Blob([tracks], { type: "text/plain;charset=utf-8" }), filename: `hovacut-tracks-${timestamp}.txt` });
+				}
+			})
 			.catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Ghép audio thất bại."))
 			.finally(() => setActiveJob(null));
 	};
@@ -172,7 +180,7 @@ export default function AutomationPage() {
 
 					{selectedTool === "convert" && <ToolCard title="Convert Media" description="Chuyển đổi video hoặc audio sang định dạng phổ biến." icon={<FileCog />}><form className="space-y-5" onSubmit={handleConvert}><FileField inputRef={convertInput} name="file" label="Video hoặc audio" accept="audio/*,video/*" icon={<FileCog />} /><SelectField id="convert-format" name="format" label="Định dạng đầu ra" options={[{ value: "mp3", label: "MP3 · 320 kbps" }, { value: "wav", label: "WAV · PCM 44.1 kHz" }, { value: "mp4", label: "MP4 · H.264/AAC" }]} /><SubmitButton busy={activeJob === "convert"} disabled={!status?.available || activeJob !== null} label="Chuyển đổi" icon={<FileCog />} /></form></ToolCard>}
 
-					{selectedTool === "join-audio" && <ToolCard title="Ghép / Random MP3" description="Sắp xếp vị trí và ghép 2–50 file thành playlist MP3 320 kbps." icon={<ListMusic />}><form className="space-y-5" onSubmit={handleJoinAudio}><MultiFileField inputRef={joinAudioInput} files={joinAudioFiles} onFilesChange={(files) => { setJoinAudioFiles(files); setPinnedAudioFiles([]); }} /><PlaylistEditor files={joinAudioFiles} pinnedFiles={pinnedAudioFiles} onMove={moveAudio} onMoveTop={moveAudioToTop} onTogglePin={togglePinnedAudio} onRemove={(index) => { const file = joinAudioFiles[index]; setJoinAudioFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)); setPinnedAudioFiles((current) => current.filter((item) => item !== file)); }} onShuffle={shuffleAudio} /><label className="flex items-center gap-3 rounded-md border p-3 text-sm"><input type="checkbox" name="random" value="true" /><Shuffle className="size-4" /> Random lại một lần nữa trên server trước khi ghép</label><SubmitButton busy={activeJob === "join-audio"} disabled={!status?.available || activeJob !== null || joinAudioFiles.length < 2} label="Tạo playlist MP3" icon={<Music2 />} /></form></ToolCard>}
+					{selectedTool === "join-audio" && <ToolCard title="Ghép / Random MP3" description="Sắp xếp vị trí và ghép 2–50 file thành playlist MP3 320 kbps." icon={<ListMusic />}><form className="space-y-5" onSubmit={handleJoinAudio}><MultiFileField inputRef={joinAudioInput} files={joinAudioFiles} onFilesChange={(files) => { setJoinAudioFiles(files); setPinnedAudioFiles([]); }} /><PlaylistEditor files={joinAudioFiles} pinnedFiles={pinnedAudioFiles} onMove={moveAudio} onMoveTop={moveAudioToTop} onTogglePin={togglePinnedAudio} onRemove={(index) => { const file = joinAudioFiles[index]; setJoinAudioFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)); setPinnedAudioFiles((current) => current.filter((item) => item !== file)); }} onShuffle={shuffleAudio} /><label className="flex items-center gap-3 rounded-md border p-3 text-sm"><input type="checkbox" name="exportTracks" value="true" /> Xuất Tracks List (.txt) theo thứ tự danh sách hiện tại</label><SubmitButton busy={activeJob === "join-audio"} disabled={!status?.available || activeJob !== null || joinAudioFiles.length < 2} label="Tạo playlist MP3" icon={<Music2 />} /></form></ToolCard>}
 				</section>
 
 				<aside className="h-fit rounded-lg border bg-background lg:sticky lg:top-4"><div className="border-b px-4 py-3"><h2 className="font-semibold">Kết quả</h2><p className="text-xs text-muted-foreground">{jobs.length} file trong phiên này</p></div><div className="max-h-[calc(100vh-7rem)] space-y-2 overflow-y-auto p-3">{jobs.length === 0 ? <div className="rounded-md border border-dashed p-6 text-center"><Download className="mx-auto mb-2 size-5 text-muted-foreground" /><p className="text-sm text-muted-foreground">Chưa có file kết quả</p></div> : jobs.map((job) => <div key={job.id} className="flex items-center gap-3 rounded-md border p-3"><CheckCircle2 className="size-5 shrink-0 text-green-500" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{job.filename}</p><p className="text-xs text-muted-foreground">{job.createdAt.toLocaleTimeString("vi-VN")}</p></div><Button asChild variant="outline" size="icon"><a href={job.url} download={job.filename} aria-label="Tải file"><Download /></a></Button></div>)}</div></aside>
@@ -215,6 +223,10 @@ function PlaylistEditor({ files, pinnedFiles, onMove, onMoveTop, onTogglePin, on
 function formatFileSize(bytes: number) {
 	if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function stripAudioExtension(filename: string) {
+	return filename.replace(/\.(mp3|wav|m4a|aac|ogg|flac|opus|wma)$/i, "");
 }
 
 function MultiMediaField({ inputRef }: { inputRef: RefObject<HTMLInputElement | null> }) {
