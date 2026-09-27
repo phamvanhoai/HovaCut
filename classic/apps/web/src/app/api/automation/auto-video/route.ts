@@ -1,4 +1,5 @@
 import path from "node:path";
+import { writeFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { IMAGE_AUDIO_RESOLUTIONS, type ImageAudioResolution } from "@/automation/types";
 import { getFfmpegStatus, runFfmpeg } from "@/automation/server/ffmpeg";
@@ -6,6 +7,15 @@ import { fileResponse, MAX_MEDIA_BYTES, saveUpload, withJobDirectory } from "@/a
 
 export const runtime = "nodejs";
 const MAX_BACKGROUNDS = 200;
+
+function shuffle<T>(items: T[]) {
+	const result = [...items];
+	for (let index = result.length - 1; index > 0; index--) {
+		const target = Math.floor(Math.random() * (index + 1));
+		[result[index], result[target]] = [result[target], result[index]];
+	}
+	return result;
+}
 
 export async function POST(request: Request) {
 	const status = await getFfmpegStatus();
@@ -20,21 +30,25 @@ export async function POST(request: Request) {
 
 	const resolution: ImageAudioResolution = form.get("resolution") === "4k" ? "4k" : "1080p";
 	const { width, height } = IMAGE_AUDIO_RESOLUTIONS[resolution];
-	const selectedIndex = Math.floor(Math.random() * backgrounds.length);
-	const selectedBackground = backgrounds[selectedIndex];
+	const randomizedBackgrounds = shuffle(backgrounds);
 
 	try {
 		return await withJobDirectory({ prefix: "hovacut-auto-video-", run: async (directory) => {
-			const [audioPath, backgroundPath] = await Promise.all([
+			const [audioPath, backgroundPaths] = await Promise.all([
 				saveUpload({ file: audio, directory, index: 0 }),
-				saveUpload({ file: selectedBackground, directory, index: 1 }),
+				Promise.all(randomizedBackgrounds.map((file, index) => saveUpload({ file, directory, index: index + 1 }))),
 			]);
+			const concatPath = path.join(directory, "backgrounds.txt");
+			const concatList = backgroundPaths.map((filePath) => `file '${filePath.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n");
+			await writeFile(concatPath, concatList, "utf8");
 			const output = path.join(directory, "auto-video.mp4");
 			const filter = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p`;
 			await runFfmpeg({ args: [
 				"-y",
 				"-stream_loop", "-1",
-				"-i", backgroundPath,
+				"-f", "concat",
+				"-safe", "0",
+				"-i", concatPath,
 				"-i", audioPath,
 				"-map", "0:v:0",
 				"-map", "1:a:0",
