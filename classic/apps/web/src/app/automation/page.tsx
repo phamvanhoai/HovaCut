@@ -206,10 +206,32 @@ export default function AutomationPage() {
 			setAutoMp3Progress(null);
 		}
 	};
-	const handleAutoVideo = (event: FormEvent<HTMLFormElement>) => {
+	const handleAutoVideo = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
-		if (!autoVideoAudioInput.current?.files?.[0] || !(backgroundsInput.current?.files?.length)) return setError("Chọn audio và ít nhất một video nền.");
-		return runTool({ event, tool: "auto-video", endpoint: "/api/automation/auto-video", filename: "hovacut-auto-video-{date}.mp4" });
+		const audio = autoVideoAudioInput.current?.files?.[0];
+		const backgrounds = Array.from(backgroundsInput.current?.files ?? []).filter((file) => file.type.startsWith("video/") || /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(file.name));
+		if (!audio || backgrounds.length === 0) return setError("Chọn audio và ít nhất một video nền.");
+		const totalBytes = audio.size + backgrounds.reduce((total, file) => total + file.size, 0);
+		if (totalBytes > 1.5 * 1024 * 1024 * 1024) return setError("Thư mục video vượt 1,5 GB. Bản web localhost không thể nạp an toàn; cần bản desktop để FFmpeg đọc trực tiếp đường dẫn.");
+		const data = new FormData();
+		data.append("audio", audio, audio.name);
+		for (const file of backgrounds) data.append("backgrounds", file, file.name);
+		data.set("resolution", String(new FormData(event.currentTarget).get("resolution") ?? "1080p"));
+		setError(null);
+		setActiveJob("auto-video");
+		try {
+			const response = await fetch("/api/automation/auto-video", { method: "POST", body: data });
+			if (!response.ok) {
+				const body: unknown = await response.json().catch(() => null);
+				const message = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string" ? body.error : `Render failed (${response.status}).`;
+				throw new Error(message);
+			}
+			addCompletedJob({ blob: await response.blob(), filename: `hovacut-auto-video-${new Date().toISOString().replace(/[:.]/g, "-")}.mp4` });
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : "Render Auto Video thất bại.");
+		} finally {
+			setActiveJob(null);
+		}
 	};
 
 	return (

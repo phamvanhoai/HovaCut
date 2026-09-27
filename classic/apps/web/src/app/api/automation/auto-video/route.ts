@@ -20,7 +20,12 @@ function shuffle<T>(items: T[]) {
 export async function POST(request: Request) {
 	const status = await getFfmpegStatus();
 	if (!status.available) return NextResponse.json({ error: status.error }, { status: 503 });
-	const form = await request.formData();
+	let form: FormData;
+	try {
+		form = await request.formData();
+	} catch {
+		return NextResponse.json({ error: "Không thể nạp thư mục video. Dữ liệu quá lớn đối với bản web localhost; hãy giảm số video hoặc dùng bản desktop." }, { status: 413 });
+	}
 	const audio = form.get("audio");
 	const backgrounds = form.getAll("backgrounds").filter((value): value is File => value instanceof File && (value.type.startsWith("video/") || /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(value.name)));
 	if (!(audio instanceof File)) return NextResponse.json({ error: "Audio file is required." }, { status: 400 });
