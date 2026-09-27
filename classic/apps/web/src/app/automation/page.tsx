@@ -2,16 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
-import { ArrowLeft, CheckCircle2, CircleAlert, Download, FileCog, ImageIcon, ListMusic, LoaderCircle, Music2, Shuffle, WandSparkles } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleAlert, Clapperboard, Download, FileCog, ImageIcon, ListMusic, LoaderCircle, Music2, Shuffle, WandSparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import type { FfmpegStatus } from "@/automation/types";
 
 type CompletedJob = { id: string; filename: string; url: string; createdAt: Date };
-type ToolId = "image-audio" | "convert" | "join-audio";
+type ToolId = "auto-video" | "image-audio" | "convert" | "join-audio";
 
 const TOOLS = [
+	{ id: "auto-video" as const, label: "Auto Video", description: "Random video nền", icon: Clapperboard },
 	{ id: "image-audio" as const, label: "Ảnh + Audio", description: "Tạo video MP4", icon: ImageIcon },
 	{ id: "convert" as const, label: "Convert Media", description: "Đổi định dạng", icon: FileCog },
 	{ id: "join-audio" as const, label: "Ghép / Random MP3", description: "Tạo playlist", icon: ListMusic },
@@ -19,7 +20,7 @@ const TOOLS = [
 
 export default function AutomationPage() {
 	const [status, setStatus] = useState<FfmpegStatus | null>(null);
-	const [selectedTool, setSelectedTool] = useState<ToolId>("image-audio");
+	const [selectedTool, setSelectedTool] = useState<ToolId>("auto-video");
 	const [activeJob, setActiveJob] = useState<ToolId | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [jobs, setJobs] = useState<CompletedJob[]>([]);
@@ -28,6 +29,8 @@ export default function AutomationPage() {
 	const audioInput = useRef<HTMLInputElement>(null);
 	const convertInput = useRef<HTMLInputElement>(null);
 	const joinAudioInput = useRef<HTMLInputElement>(null);
+	const autoVideoAudioInput = useRef<HTMLInputElement>(null);
+	const backgroundsInput = useRef<HTMLInputElement>(null);
 
 	useEffect(() => {
 		fetch("/api/automation/ffmpeg/status", { cache: "no-store" })
@@ -78,6 +81,11 @@ export default function AutomationPage() {
 		if ((joinAudioInput.current?.files?.length ?? 0) < 2) return setError("Chọn ít nhất hai file audio.");
 		return runTool({ event, tool: "join-audio", endpoint: "/api/automation/join-audio", filename: "hovacut-playlist-{date}.mp3" });
 	};
+	const handleAutoVideo = (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (!autoVideoAudioInput.current?.files?.[0] || !(backgroundsInput.current?.files?.length)) return setError("Chọn audio và ít nhất một video nền.");
+		return runTool({ event, tool: "auto-video", endpoint: "/api/automation/auto-video", filename: "hovacut-auto-video-{date}.mp4" });
+	};
 
 	return (
 		<main className="flex min-h-screen flex-col bg-muted/20">
@@ -97,6 +105,7 @@ export default function AutomationPage() {
 
 				<section className="min-w-0">
 					{error && <div className="mb-4 flex gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"><CircleAlert className="mt-0.5 size-4 shrink-0" />{error}</div>}
+					{selectedTool === "auto-video" && <ToolCard title="Auto Video" description="Chọn ngẫu nhiên một video nền, loop theo độ dài audio và xuất MP4." icon={<Clapperboard />}><form className="space-y-5" onSubmit={handleAutoVideo}><FileField inputRef={autoVideoAudioInput} name="audio" label="Audio chính" accept="audio/*" icon={<Music2 />} /><MultiMediaField inputRef={backgroundsInput} /><SelectField id="auto-resolution" name="resolution" label="Độ phân giải" options={[{ value: "1080p", label: "Full HD · 1920×1080" }, { value: "4k", label: "4K · 3840×2160" }]} /><p className="text-sm text-muted-foreground">Mỗi lần render sẽ chọn ngẫu nhiên một video trong danh sách nền.</p><SubmitButton busy={activeJob === "auto-video"} disabled={!status?.available || activeJob !== null} label="Render Auto Video" icon={<Clapperboard />} /></form></ToolCard>}
 					{selectedTool === "image-audio" && <ToolCard title="Ảnh + Audio → MP4" description="Tạo video từ một ảnh tĩnh và một bản audio." icon={<WandSparkles />}><form className="space-y-5" onSubmit={handleImageAudio}><div className="grid gap-4 sm:grid-cols-2"><FileField inputRef={imageInput} name="image" label="Ảnh nền" accept="image/jpeg,image/png,image/webp,image/bmp" icon={<ImageIcon />} /><FileField inputRef={audioInput} name="audio" label="Audio" accept="audio/*" icon={<Music2 />} /></div><SelectField id="resolution" name="resolution" label="Độ phân giải" options={[{ value: "1080p", label: "Full HD · 1920×1080" }, { value: "4k", label: "4K · 3840×2160" }]} /><p className="text-sm text-muted-foreground">Giữ đúng tỷ lệ ảnh và kết thúc theo độ dài audio.</p><SubmitButton busy={activeJob === "image-audio"} disabled={!status?.available || activeJob !== null} label="Bắt đầu render" icon={<WandSparkles />} /></form></ToolCard>}
 
 					{selectedTool === "convert" && <ToolCard title="Convert Media" description="Chuyển đổi video hoặc audio sang định dạng phổ biến." icon={<FileCog />}><form className="space-y-5" onSubmit={handleConvert}><FileField inputRef={convertInput} name="file" label="Video hoặc audio" accept="audio/*,video/*" icon={<FileCog />} /><SelectField id="convert-format" name="format" label="Định dạng đầu ra" options={[{ value: "mp3", label: "MP3 · 320 kbps" }, { value: "wav", label: "WAV · PCM 44.1 kHz" }, { value: "mp4", label: "MP4 · H.264/AAC" }]} /><SubmitButton busy={activeJob === "convert"} disabled={!status?.available || activeJob !== null} label="Chuyển đổi" icon={<FileCog />} /></form></ToolCard>}
@@ -136,6 +145,11 @@ function FileField({ inputRef, name, label, accept, icon }: { inputRef: RefObjec
 function MultiFileField({ inputRef }: { inputRef: RefObject<HTMLInputElement | null> }) {
 	const [summary, setSummary] = useState("");
 	return <label className={`flex min-h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-md border border-dashed p-6 text-center transition hover:bg-accent ${summary ? "border-foreground/40 bg-accent/30" : ""}`}><ListMusic className="size-7 text-muted-foreground" /><span className="text-sm font-medium">Chọn 2–50 file audio</span><span className="text-xs text-muted-foreground">{summary || "MP3, WAV, M4A, AAC, OGG, FLAC"}</span><input ref={inputRef} className="sr-only" type="file" name="files" accept="audio/*" multiple required onChange={(event) => { const files = Array.from(event.target.files ?? []); setSummary(files.length ? `${files.length} file · ${files.slice(0, 2).map((file) => file.name).join(", ")}${files.length > 2 ? "…" : ""}` : ""); }} /></label>;
+}
+
+function MultiMediaField({ inputRef }: { inputRef: RefObject<HTMLInputElement | null> }) {
+	const [summary, setSummary] = useState("");
+	return <label className={`flex min-h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-md border border-dashed p-6 text-center transition hover:bg-accent ${summary ? "border-foreground/40 bg-accent/30" : ""}`}><Clapperboard className="size-7 text-muted-foreground" /><span className="text-sm font-medium">Chọn 1–30 video nền</span><span className="max-w-full truncate text-xs text-muted-foreground">{summary || "MP4, MOV, WebM và các định dạng FFmpeg hỗ trợ"}</span><input ref={inputRef} className="sr-only" type="file" name="backgrounds" accept="video/*" multiple required onChange={(event) => { const files = Array.from(event.target.files ?? []); setSummary(files.length ? `${files.length} video · ${files.slice(0, 2).map((file) => file.name).join(", ")}${files.length > 2 ? "…" : ""}` : ""); }} /></label>;
 }
 
 function ToolCard({ title, description, icon, children }: { title: string; description: string; icon: ReactNode; children: ReactNode }) {

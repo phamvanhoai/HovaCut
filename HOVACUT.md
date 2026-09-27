@@ -20,6 +20,7 @@ Open <http://localhost:3000>. Docker is optional for the editor UI; account, dat
 The first local automation workflow is available at <http://localhost:3000/automation>:
 
 - image + audio to H.264/AAC MP4;
+- auto video: choose one random background from up to 30 videos, loop it to the audio duration, and render H.264/AAC;
 - Full HD and 4K presets;
 - media conversion to MP3 320 kbps, WAV PCM, or H.264/AAC MP4;
 - join 2–50 audio files into a 320 kbps MP3 playlist, with optional random ordering;
