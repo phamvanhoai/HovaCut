@@ -109,11 +109,11 @@ export default function AutomationPage() {
 				}
 				return response.blob();
 			})
-			.then(async (blob) => {
+			.then((blob) => {
 				const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 				addCompletedJob({ blob, filename: `hovacut-playlist-${timestamp}.mp3` });
 				if (exportTracks) {
-					const tracks = await createCgtTracksList(joinAudioFiles);
+					const tracks = createCgtTracksList({ files: joinAudioFiles, durations: audioDurations });
 					addCompletedJob({ blob: new Blob([tracks], { type: "text/plain;charset=utf-8" }), filename: `hovacut-tracks-${timestamp}.txt` });
 				}
 			})
@@ -192,7 +192,7 @@ export default function AutomationPage() {
 
 					{selectedTool === "convert" && <ToolCard title="Convert Media" description="Chuyển đổi video hoặc audio sang định dạng phổ biến." icon={<FileCog />}><form className="space-y-5" onSubmit={handleConvert}><FileField inputRef={convertInput} name="file" label="Video hoặc audio" accept="audio/*,video/*" icon={<FileCog />} /><SelectField id="convert-format" name="format" label="Định dạng đầu ra" options={[{ value: "mp3", label: "MP3 · 320 kbps" }, { value: "wav", label: "WAV · PCM 44.1 kHz" }, { value: "mp4", label: "MP4 · H.264/AAC" }]} /><SubmitButton busy={activeJob === "convert"} disabled={!status?.available || activeJob !== null} label="Chuyển đổi" icon={<FileCog />} /></form></ToolCard>}
 
-					{selectedTool === "join-audio" && <ToolCard title="Ghép / Random MP3" description="Sắp xếp vị trí và ghép 2–50 file thành playlist MP3 320 kbps." icon={<ListMusic />}><form className="space-y-5" onSubmit={handleJoinAudio}><MultiFileField inputRef={joinAudioInput} files={joinAudioFiles} onFilesChange={(files) => setJoinAudioFiles((current) => mergeAudioFiles({ current, additions: files }))} /><PlaylistEditor files={joinAudioFiles} pinnedFiles={pinnedAudioFiles} durations={audioDurations} onMove={moveAudio} onMoveTop={moveAudioToTop} onTogglePin={togglePinnedAudio} onRemove={(index) => { const file = joinAudioFiles[index]; setJoinAudioFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)); setPinnedAudioFiles((current) => current.filter((item) => item !== file)); }} onClear={() => { setJoinAudioFiles([]); setPinnedAudioFiles([]); }} onShuffle={shuffleAudio} /><label className="flex items-center gap-3 rounded-md border p-3 text-sm"><input type="checkbox" name="exportTracks" value="true" /> Xuất Tracks List (.txt) theo thứ tự danh sách hiện tại</label><SubmitButton busy={activeJob === "join-audio"} disabled={!status?.available || activeJob !== null || joinAudioFiles.length < 2} label="Tạo playlist MP3" icon={<Music2 />} /></form></ToolCard>}
+					{selectedTool === "join-audio" && <ToolCard title="Ghép / Random MP3" description="Sắp xếp vị trí và ghép 2–50 file thành playlist MP3 320 kbps." icon={<ListMusic />}><form className="space-y-5" onSubmit={handleJoinAudio}><MultiFileField inputRef={joinAudioInput} files={joinAudioFiles} onFilesChange={(files) => setJoinAudioFiles((current) => mergeAudioFiles({ current, additions: files }))} /><PlaylistEditor files={joinAudioFiles} pinnedFiles={pinnedAudioFiles} durations={audioDurations} onMove={moveAudio} onMoveTop={moveAudioToTop} onTogglePin={togglePinnedAudio} onRemove={(index) => { const file = joinAudioFiles[index]; setJoinAudioFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)); setPinnedAudioFiles((current) => current.filter((item) => item !== file)); }} onClear={() => { setJoinAudioFiles([]); setPinnedAudioFiles([]); }} onShuffle={shuffleAudio} /><label className="flex items-center gap-3 rounded-md border p-3 text-sm"><input type="checkbox" name="exportTracks" value="true" defaultChecked /> Xuất Tracks List (.txt) theo thứ tự danh sách hiện tại</label><SubmitButton busy={activeJob === "join-audio"} disabled={!status?.available || activeJob !== null || joinAudioFiles.length < 2 || joinAudioFiles.some((file) => audioDurations[audioFileKey(file)] === undefined)} label="Tạo playlist MP3" icon={<Music2 />} /></form></ToolCard>}
 				</section>
 
 				<aside className="h-fit rounded-lg border bg-background lg:sticky lg:top-4"><div className="border-b px-4 py-3"><h2 className="font-semibold">Kết quả</h2><p className="text-xs text-muted-foreground">{jobs.length} file trong phiên này</p></div><div className="max-h-[calc(100vh-7rem)] space-y-2 overflow-y-auto p-3">{jobs.length === 0 ? <div className="rounded-md border border-dashed p-6 text-center"><Download className="mx-auto mb-2 size-5 text-muted-foreground" /><p className="text-sm text-muted-foreground">Chưa có file kết quả</p></div> : jobs.map((job) => <div key={job.id} className="flex items-center gap-3 rounded-md border p-3"><CheckCircle2 className="size-5 shrink-0 text-green-500" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{job.filename}</p><p className="text-xs text-muted-foreground">{job.createdAt.toLocaleTimeString("vi-VN")}</p></div><Button asChild variant="outline" size="icon"><a href={job.url} download={job.filename} aria-label="Tải file"><Download /></a></Button></div>)}</div></aside>
@@ -275,12 +275,12 @@ function stripAudioExtension(filename: string) {
 	return filename.replace(/\.(mp3|wav|m4a|aac|ogg|flac|opus|wma)$/i, "");
 }
 
-async function createCgtTracksList(files: File[]) {
+function createCgtTracksList({ files, durations }: { files: File[]; durations: Record<string, number> }) {
 	let elapsedSeconds = 0;
 	const lines: string[] = [];
 	for (const file of files) {
 		lines.push(`${formatTrackTime(elapsedSeconds)} ${stripAudioExtension(file.name)}`);
-		elapsedSeconds += await readAudioDuration(file);
+		elapsedSeconds += durations[audioFileKey(file)] ?? 0;
 	}
 	return lines.join("\r\n");
 }
