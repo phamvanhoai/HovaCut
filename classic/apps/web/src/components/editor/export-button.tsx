@@ -135,7 +135,7 @@ function ExportPopover({
 				return true;
 			const transform = buildTransformFromParams({ params: element.params });
 			return (
-				transform.rotate !== 0 ||
+				(element.type === "text" && transform.rotate !== 0) ||
 				Boolean(element.animations) ||
 				(element.effects?.length ?? 0) > 0 ||
 				("masks" in element && (element.masks?.length ?? 0) > 0) ||
@@ -168,6 +168,7 @@ function ExportPopover({
 					positionX: transform.position.x,
 					positionY: transform.position.y,
 					opacity: readOpacityFromParams({ params: element.params }),
+					rotation: transform.rotate,
 				},
 			];
 		});
@@ -200,6 +201,11 @@ function ExportPopover({
 					positionX: transform.position.x,
 					positionY: transform.position.y,
 					opacity: readOpacityFromParams({ params: element.params }),
+					fontFamily:
+						typeof element.params.fontFamily === "string"
+							? element.params.fontFamily
+							: "Arial",
+					rotation: transform.rotate,
 				},
 			];
 		});
