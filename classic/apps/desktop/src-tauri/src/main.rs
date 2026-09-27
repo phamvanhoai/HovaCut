@@ -61,12 +61,48 @@ fn shuffled(mut paths: Vec<String>) -> Vec<String> {
     paths
 }
 
+fn encoder_available(encoder: &str) -> bool {
+    Command::new(ffmpeg_path())
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=s=64x64:d=0.1",
+            "-frames:v",
+            "1",
+            "-c:v",
+            encoder,
+            "-f",
+            "null",
+            "-",
+        ])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn detect_video_encoders() -> Vec<String> {
+    [
+        ("nvidia", "h264_nvenc"),
+        ("amd", "h264_amf"),
+        ("intel", "h264_qsv"),
+    ]
+    .into_iter()
+    .filter_map(|(name, encoder)| encoder_available(encoder).then(|| name.to_string()))
+    .collect()
+}
+
 #[tauri::command]
 fn render_auto_video(
     audio_path: String,
     video_paths: Vec<String>,
     output_path: String,
     resolution: String,
+    encoder: String,
 ) -> Result<String, String> {
     if !Path::new(&audio_path).is_file() {
         return Err("File audio không tồn tại.".into());
@@ -97,6 +133,24 @@ fn render_auto_video(
         .join("\n");
     fs::write(&list_path, list).map_err(|error| error.to_string())?;
     let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p");
+    let video_encoder = match encoder.as_str() {
+        "nvidia" => "h264_nvenc",
+        "amd" => "h264_amf",
+        "intel" => "h264_qsv",
+        _ => "libx264",
+    };
+    let (speed_option, speed_value) = if video_encoder == "h264_amf" {
+        ("-quality", "speed")
+    } else {
+        (
+            "-preset",
+            if video_encoder == "libx264" {
+                "medium"
+            } else {
+                "fast"
+            },
+        )
+    };
     let result = Command::new(ffmpeg_path())
         .args([
             "-y",
@@ -119,9 +173,9 @@ fn render_auto_video(
             "-vf",
             &filter,
             "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
+            video_encoder,
+            speed_option,
+            speed_value,
             "-c:a",
             "aac",
             "-b:a",
@@ -405,6 +459,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_media_files,
+            detect_video_encoders,
             render_auto_video,
             render_auto_mp3,
             render_join_audio,
