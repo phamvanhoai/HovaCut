@@ -34,6 +34,8 @@ import {
 } from "@/components/section";
 import { useEditor } from "@/editor/use-editor";
 import { DEFAULT_EXPORT_OPTIONS } from "@/export/defaults";
+import { TICKS_PER_SECOND } from "@/wasm";
+import { toast } from "sonner";
 
 function isExportFormat(value: string): value is ExportFormat {
 	return EXPORT_FORMAT_VALUES.some((formatValue) => formatValue === value);
@@ -110,6 +112,76 @@ function ExportPopover({
 	const [shouldIncludeAudio, setShouldIncludeAudio] = useState<boolean>(
 		DEFAULT_EXPORT_OPTIONS.includeAudio ?? true,
 	);
+	const [isNativeExporting, setIsNativeExporting] = useState(false);
+
+	const handleNativeExport = async () => {
+		if (!window.__TAURI__) return;
+		const scene = editor.scenes.getActiveScene();
+		const assets = new Map(
+			editor.media.getAssets().map((asset) => [asset.id, asset]),
+		);
+		if (scene.tracks.overlay.some((track) => track.elements.length > 0)) {
+			toast.error("Native GPU hiện chưa hỗ trợ overlay/chữ/hiệu ứng.");
+			return;
+		}
+		const clips = scene.tracks.main.elements.flatMap((element) => {
+			if (element.type !== "video" && element.type !== "image") return [];
+			const asset = assets.get(element.mediaId);
+			if (!asset?.sourcePath) return [];
+			return [
+				{
+					path: asset.sourcePath,
+					kind: element.type,
+					duration: element.duration / TICKS_PER_SECOND,
+					trimStart: element.trimStart / TICKS_PER_SECOND,
+				},
+			];
+		});
+		if (
+			clips.length !== scene.tracks.main.elements.length ||
+			clips.length === 0
+		) {
+			toast.error("Timeline phải chỉ gồm video/ảnh được nhập từ ổ đĩa.");
+			return;
+		}
+		const outputPath = await window.__TAURI__.dialog.save({
+			defaultPath: `${activeProject.metadata.name}.mp4`,
+			filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
+		});
+		if (!outputPath) return;
+		setIsNativeExporting(true);
+		try {
+			const encoders = await window.__TAURI__.core.invoke<string[]>(
+				"detect_video_encoders",
+			);
+			const encoder = encoders.includes("nvidia")
+				? "nvidia"
+				: encoders.includes("intel")
+					? "intel"
+					: "cpu";
+			const fpsValue =
+				activeProject.settings.fps.numerator /
+				activeProject.settings.fps.denominator;
+			await window.__TAURI__.core.invoke("render_native_timeline", {
+				clips,
+				outputPath,
+				width: activeProject.settings.canvasSize.width,
+				height: activeProject.settings.canvasSize.height,
+				fps: fpsValue,
+				encoder,
+			});
+			toast.success("Đã xuất video bằng FFmpeg/GPU", {
+				description: outputPath,
+			});
+			onOpenChange(false);
+		} catch (error) {
+			toast.error("Native export thất bại", {
+				description: error instanceof Error ? error.message : "FFmpeg error",
+			});
+		} finally {
+			setIsNativeExporting(false);
+		}
+	};
 
 	const handleExport = async () => {
 		if (!activeProject) return;
@@ -153,6 +225,19 @@ function ExportPopover({
 				/>
 			) : (
 				<>
+					{typeof window !== "undefined" && window.__TAURI__ && !isExporting ? (
+						<div className="p-3 border-b">
+							<Button
+								className="w-full"
+								onClick={handleNativeExport}
+								disabled={isNativeExporting}
+							>
+								{isNativeExporting
+									? "FFmpeg đang xuất..."
+									: "Xuất nhanh bằng GPU (Beta)"}
+							</Button>
+						</div>
+					) : null}
 					<div className="flex items-center justify-between p-3 border-b">
 						<h3 className="font-medium text-sm">
 							{isExporting ? "Exporting project" : "Export project"}

@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use serde_json::Value;
 use std::{
     env, fs,
@@ -169,6 +170,86 @@ fn detect_video_encoders() -> Vec<String> {
     .into_iter()
     .filter_map(|(name, encoder)| encoder_available(encoder).then(|| name.to_string()))
     .collect()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeTimelineClip {
+    path: String,
+    kind: String,
+    duration: f64,
+    trim_start: f64,
+}
+
+#[tauri::command]
+fn render_native_timeline(
+    clips: Vec<NativeTimelineClip>,
+    output_path: String,
+    width: u32,
+    height: u32,
+    fps: f64,
+    encoder: String,
+) -> Result<String, String> {
+    if clips.is_empty() || clips.iter().any(|clip| !Path::new(&clip.path).is_file()) {
+        return Err("Timeline không có media native hợp lệ.".into());
+    }
+    let mut command = Command::new(ffmpeg_path());
+    command.arg("-y");
+    for clip in &clips {
+        if clip.kind == "image" {
+            command.args([
+                "-loop",
+                "1",
+                "-t",
+                &clip.duration.to_string(),
+                "-i",
+                &clip.path,
+            ]);
+        } else {
+            command.args([
+                "-ss",
+                &clip.trim_start.to_string(),
+                "-t",
+                &clip.duration.to_string(),
+                "-i",
+                &clip.path,
+            ]);
+        }
+    }
+    let mut filter = String::new();
+    for index in 0..clips.len() {
+        filter.push_str(&format!("[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1,format=yuv420p[v{index}];"));
+    }
+    for index in 0..clips.len() {
+        filter.push_str(&format!("[v{index}]"));
+    }
+    filter.push_str(&format!("concat=n={}:v=1:a=0[outv]", clips.len()));
+    let video_encoder = match encoder.as_str() {
+        "nvidia" => "h264_nvenc",
+        "intel" => "h264_qsv",
+        "amd" => "h264_amf",
+        _ => "libx264",
+    };
+    let output = command
+        .args([
+            "-filter_complex",
+            &filter,
+            "-map",
+            "[outv]",
+            "-c:v",
+            video_encoder,
+            "-preset",
+            "fast",
+            "-movflags",
+            "+faststart",
+            &output_path,
+        ])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    Ok(output_path)
 }
 
 #[tauri::command]
@@ -540,6 +621,7 @@ fn main() {
             import_project_json,
             export_project_json,
             detect_video_encoders,
+            render_native_timeline,
             render_auto_video,
             render_auto_mp3,
             render_join_audio,
