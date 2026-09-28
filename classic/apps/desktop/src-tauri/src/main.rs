@@ -1440,8 +1440,7 @@ fn cancel_native_timeline() {
     CANCEL_NATIVE_RENDER.store(true, Ordering::SeqCst);
 }
 
-#[tauri::command]
-fn render_auto_video(
+fn render_auto_video_blocking(
     audio_path: String,
     video_paths: Vec<String>,
     logo_path: Option<String>,
@@ -1586,6 +1585,35 @@ fn render_auto_video(
         return Err(String::from_utf8_lossy(&output.stderr).into_owned());
     }
     Ok(output_path)
+}
+
+#[tauri::command]
+async fn render_auto_video(
+    audio_path: String,
+    video_paths: Vec<String>,
+    logo_path: Option<String>,
+    logo_mode: Option<String>,
+    logo_position: Option<String>,
+    logo_width_percent: Option<f64>,
+    output_path: String,
+    resolution: String,
+    encoder: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        render_auto_video_blocking(
+            audio_path,
+            video_paths,
+            logo_path,
+            logo_mode,
+            logo_position,
+            logo_width_percent,
+            output_path,
+            resolution,
+            encoder,
+        )
+    })
+    .await
+    .map_err(|error| format!("Worker Auto Video bị dừng: {error}"))?
 }
 
 fn audio_duration(path: &str) -> f64 {
