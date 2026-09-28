@@ -3,6 +3,13 @@ import { withBotId } from "botid/next/config";
 import { withContentCollections } from "@content-collections/next";
 
 const nextConfig: NextConfig = {
+	webpack: (config) => {
+		config.experiments = {
+			...config.experiments,
+			asyncWebAssembly: true,
+		};
+		return config;
+	},
 	compiler: {
 		removeConsole: process.env.NODE_ENV === "production",
 	},
