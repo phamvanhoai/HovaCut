@@ -116,8 +116,7 @@ struct ExtractFramesResult {
     count: usize,
 }
 
-#[tauri::command]
-fn extract_video_frames(
+fn extract_video_frames_blocking(
     input_path: String,
     output_directory: String,
     interval_seconds: f64,
@@ -174,8 +173,7 @@ fn extract_video_frames(
     })
 }
 
-#[tauri::command]
-fn join_video_files(
+fn join_video_files_blocking(
     video_paths: Vec<String>,
     output_path: String,
     resolution: String,
@@ -243,8 +241,7 @@ fn join_video_files(
     Ok(output_path)
 }
 
-#[tauri::command]
-fn render_lofi_video(
+fn render_lofi_video_blocking(
     background_path: String,
     audio_path: String,
     effect_path: Option<String>,
@@ -1649,8 +1646,7 @@ fn track_time(seconds: f64) -> String {
     )
 }
 
-#[tauri::command]
-fn render_auto_mp3(
+fn render_auto_mp3_blocking(
     good_paths: Vec<String>,
     other_paths: Vec<String>,
     good_count: usize,
@@ -1722,8 +1718,7 @@ fn render_auto_mp3(
     Ok(outputs)
 }
 
-#[tauri::command]
-fn render_join_audio(
+fn render_join_audio_blocking(
     audio_paths: Vec<String>,
     output_path: String,
     export_tracks: bool,
@@ -1782,8 +1777,7 @@ fn render_join_audio(
     Ok(outputs)
 }
 
-#[tauri::command]
-fn convert_media(
+fn convert_media_blocking(
     input_path: String,
     output_path: String,
     format: String,
@@ -1819,8 +1813,7 @@ fn convert_media(
     Ok(output_path)
 }
 
-#[tauri::command]
-fn render_image_audio(
+fn render_image_audio_blocking(
     image_path: String,
     audio_path: String,
     output_path: String,
@@ -1869,6 +1862,122 @@ fn render_image_audio(
         return Err(String::from_utf8_lossy(&output.stderr).into_owned());
     }
     Ok(output_path)
+}
+
+#[tauri::command]
+async fn extract_video_frames(
+    input_path: String,
+    output_directory: String,
+    interval_seconds: f64,
+    format: String,
+) -> Result<ExtractFramesResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_video_frames_blocking(input_path, output_directory, interval_seconds, format)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn join_video_files(
+    video_paths: Vec<String>,
+    output_path: String,
+    resolution: String,
+    encoder: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        join_video_files_blocking(video_paths, output_path, resolution, encoder)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn render_lofi_video(
+    background_path: String,
+    audio_path: String,
+    effect_path: Option<String>,
+    logo_path: Option<String>,
+    output_path: String,
+    resolution: String,
+    encoder: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        render_lofi_video_blocking(
+            background_path,
+            audio_path,
+            effect_path,
+            logo_path,
+            output_path,
+            resolution,
+            encoder,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn render_auto_mp3(
+    good_paths: Vec<String>,
+    other_paths: Vec<String>,
+    good_count: usize,
+    other_count: usize,
+    output_count: usize,
+    output_directory: String,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        render_auto_mp3_blocking(
+            good_paths,
+            other_paths,
+            good_count,
+            other_count,
+            output_count,
+            output_directory,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn render_join_audio(
+    audio_paths: Vec<String>,
+    output_path: String,
+    export_tracks: bool,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        render_join_audio_blocking(audio_paths, output_path, export_tracks)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn convert_media(
+    input_path: String,
+    output_path: String,
+    format: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        convert_media_blocking(input_path, output_path, format)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn render_image_audio(
+    image_path: String,
+    audio_path: String,
+    output_path: String,
+    resolution: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        render_image_audio_blocking(image_path, audio_path, output_path, resolution)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn main() {
