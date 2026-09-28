@@ -180,6 +180,12 @@ export default function AutomationPage() {
 	const [desktopLofiLogo, setDesktopLofiLogo] = useState("");
 	const [desktopListFolder, setDesktopListFolder] = useState("");
 	const [desktopTextFile, setDesktopTextFile] = useState("");
+	const [convertTextInput, setConvertTextInput] = useState("");
+	const [convertTextResult, setConvertTextResult] = useState({
+		lower: "",
+		upper: "",
+		title: "",
+	});
 	const [desktopVideoEncoders, setDesktopVideoEncoders] = useState<string[]>(
 		[],
 	);
@@ -827,6 +833,35 @@ export default function AutomationPage() {
 		} finally {
 			setActiveJob(null);
 		}
+	};
+	const handleConvertText = () => {
+		const title = convertTextInput
+			.toLocaleLowerCase("vi-VN")
+			.replace(
+				/(^|[\s\-–—/([{“‘])([\p{L}\p{N}])/gu,
+				(_match, prefix: string, character: string) =>
+					`${prefix}${character.toLocaleUpperCase("vi-VN")}`,
+			);
+		setConvertTextResult({
+			lower: convertTextInput.toLocaleLowerCase("vi-VN"),
+			upper: convertTextInput.toLocaleUpperCase("vi-VN"),
+			title,
+		});
+	};
+	const copyConvertedText = async (value: string) => {
+		await navigator.clipboard.writeText(value);
+	};
+	const saveConvertedText = async (value: string, defaultPath: string) => {
+		if (!window.__TAURI__ || !value) return;
+		const outputPath = await window.__TAURI__.dialog.save({
+			defaultPath,
+			filters: [{ name: "Text", extensions: ["txt"] }],
+		});
+		if (!outputPath) return;
+		await window.__TAURI__.core.invoke("save_export_file", {
+			outputPath,
+			data: Array.from(new TextEncoder().encode(value)),
+		});
 	};
 	const handleDesktopImageAudio = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
@@ -1967,6 +2002,50 @@ export default function AutomationPage() {
 							icon={<FileText />}
 						>
 							<div className="space-y-6">
+								<div className="space-y-4 rounded-md border p-4">
+									<h3 className="font-medium">Convert Text</h3>
+									<textarea
+										className="min-h-32 w-full rounded-md border bg-background p-3 text-sm"
+										placeholder="Nhập hoặc dán văn bản cần chuyển đổi..."
+										value={convertTextInput}
+										onChange={(event) => setConvertTextInput(event.currentTarget.value)}
+									/>
+									<div className="flex gap-2">
+										<Button type="button" onClick={handleConvertText} disabled={!convertTextInput}>
+											Chuyển đổi chữ
+										</Button>
+										<Button
+											type="button"
+											variant="outline"
+											onClick={() => {
+												setConvertTextInput("");
+												setConvertTextResult({ lower: "", upper: "", title: "" });
+											}}
+										>
+											Xóa tất cả
+										</Button>
+									</div>
+									{([
+										["Chữ thường", "lower", "chu-thuong.txt"],
+										["CHỮ HOA", "upper", "chu-hoa.txt"],
+										["Hoa Chữ Cái Đầu", "title", "hoa-chu-cai-dau.txt"],
+									] as const).map(([label, key, filename]) => (
+										<div key={key} className="space-y-2">
+											<div className="flex items-center justify-between">
+												<Label>{label}</Label>
+												<div className="flex gap-1">
+													<Button type="button" variant="ghost" size="sm" disabled={!convertTextResult[key]} onClick={() => void copyConvertedText(convertTextResult[key])}>
+														Sao chép
+													</Button>
+													<Button type="button" variant="ghost" size="sm" disabled={!convertTextResult[key]} onClick={() => void saveConvertedText(convertTextResult[key], filename)}>
+														Lưu TXT
+													</Button>
+												</div>
+											</div>
+											<textarea className="min-h-24 w-full rounded-md border bg-muted/30 p-3 text-sm" readOnly value={convertTextResult[key]} />
+										</div>
+									))}
+								</div>
 								<form className="space-y-4 rounded-md border p-4" onSubmit={handleCreateFileList}>
 									<h3 className="font-medium">Tạo danh sách từ thư mục</h3>
 									<DesktopPathField
