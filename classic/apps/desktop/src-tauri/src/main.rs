@@ -1,116 +1,17 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     env, fs,
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::Emitter;
 
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-
 static CANCEL_NATIVE_RENDER: AtomicBool = AtomicBool::new(false);
-
-fn frontend_is_ready() -> bool {
-    std::net::TcpStream::connect_timeout(
-        &"127.0.0.1:3000".parse().expect("valid frontend address"),
-        Duration::from_millis(250),
-    )
-    .is_ok()
-}
-
-fn start_frontend_server() -> Result<Option<Child>, String> {
-    if frontend_is_ready() {
-        return Ok(None);
-    }
-
-    #[cfg(debug_assertions)]
-    let (program, working_directory, arguments) = {
-        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let web_directory = manifest
-            .parent()
-            .and_then(Path::parent)
-            .ok_or_else(|| "Không tìm thấy thư mục frontend HovaCut.".to_string())?
-            .join("web");
-        let next = web_directory
-            .join("node_modules")
-            .join(".bin")
-            .join("next.exe");
-        if !next.is_file() {
-            return Err(format!("Không tìm thấy Next.js tại {}", next.display()));
-        }
-        (next, web_directory, vec!["dev", "--webpack"])
-    };
-
-    #[cfg(not(debug_assertions))]
-    let (program, working_directory, arguments) = {
-        let executable_directory = env::current_exe()
-            .map_err(|error| error.to_string())?
-            .parent()
-            .ok_or_else(|| "Cannot locate the HovaCut install directory.".to_string())?
-            .to_path_buf();
-        let frontend_directory = [
-            executable_directory.join("frontend"),
-            executable_directory.join("resources").join("frontend"),
-        ]
-        .into_iter()
-        .find(|directory| directory.join("node.exe").is_file())
-        .ok_or_else(|| "Cannot locate the packaged HovaCut frontend.".to_string())?;
-        let server_directory = frontend_directory.join("apps").join("web");
-        let server = server_directory.join("server.js");
-        if !server.is_file() {
-            return Err(format!(
-                "Cannot locate the frontend server at {}",
-                server.display()
-            ));
-        }
-        (
-            frontend_directory.join("node.exe"),
-            server_directory,
-            vec!["server.js"],
-        )
-    };
-
-    let mut command = Command::new(program);
-    command
-        .current_dir(working_directory)
-        .args(arguments)
-        .env("HOSTNAME", "127.0.0.1")
-        .env("PORT", "3000")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    #[cfg(not(debug_assertions))]
-    command
-        .env("NODE_ENV", "production")
-        .env("NEXT_PUBLIC_SITE_URL", "http://127.0.0.1:3000")
-        .env("NEXT_PUBLIC_MARBLE_API_URL", "https://api.marblecms.com")
-        .env("DATABASE_URL", "postgres://localhost/hovacut_desktop")
-        .env(
-            "BETTER_AUTH_SECRET",
-            "hovacut-desktop-local-only-secret-key",
-        )
-        .env("UPSTASH_REDIS_REST_URL", "http://127.0.0.1")
-        .env("UPSTASH_REDIS_REST_TOKEN", "desktop")
-        .env("MARBLE_WORKSPACE_KEY", "desktop")
-        .env("FREESOUND_CLIENT_ID", "desktop")
-        .env("FREESOUND_API_KEY", "desktop");
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
-    let child = command.spawn().map_err(|error| error.to_string())?;
-    for _ in 0..240 {
-        if frontend_is_ready() {
-            return Ok(Some(child));
-        }
-        thread::sleep(Duration::from_millis(250));
-    }
-    Err("Frontend HovaCut không khởi động sau 60 giây.".into())
-}
 
 #[tauri::command]
 fn list_media_files(directory: String, extensions: Vec<String>) -> Result<Vec<String>, String> {
@@ -437,6 +338,46 @@ fn ffmpeg_path() -> PathBuf {
         cgt
     } else {
         PathBuf::from("ffmpeg.exe")
+    }
+}
+
+#[derive(Serialize)]
+struct NativeFfmpegStatus {
+    enabled: bool,
+    available: bool,
+    path: String,
+    version: Option<String>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn get_ffmpeg_status() -> NativeFfmpegStatus {
+    let path = ffmpeg_path();
+    match Command::new(&path).arg("-version").output() {
+        Ok(output) if output.status.success() => NativeFfmpegStatus {
+            enabled: true,
+            available: true,
+            path: path.to_string_lossy().into_owned(),
+            version: String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .map(str::to_owned),
+            error: None,
+        },
+        Ok(output) => NativeFfmpegStatus {
+            enabled: true,
+            available: false,
+            path: path.to_string_lossy().into_owned(),
+            version: None,
+            error: Some(String::from_utf8_lossy(&output.stderr).into_owned()),
+        },
+        Err(error) => NativeFfmpegStatus {
+            enabled: true,
+            available: false,
+            path: path.to_string_lossy().into_owned(),
+            version: None,
+            error: Some(error.to_string()),
+        },
     }
 }
 
@@ -1237,8 +1178,6 @@ fn render_image_audio(
 }
 
 fn main() {
-    let mut frontend_process = start_frontend_server()
-        .unwrap_or_else(|error| panic!("Không thể khởi động giao diện HovaCut: {error}"));
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -1257,6 +1196,7 @@ fn main() {
             clear_saved_sounds_json,
             import_project_json,
             export_project_json,
+            get_ffmpeg_status,
             detect_video_encoders,
             render_native_timeline,
             cancel_native_timeline,
@@ -1268,8 +1208,4 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động HovaCut Desktop");
-    if let Some(process) = frontend_process.as_mut() {
-        let _ = process.kill();
-        let _ = process.wait();
-    }
 }

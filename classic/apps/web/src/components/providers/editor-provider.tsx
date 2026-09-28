@@ -59,7 +59,14 @@ export function EditorProvider({ projectId, children }: EditorProviderProps) {
 						const newProjectId = await editor.project.createNewProject({
 							name: "Untitled Project",
 						});
-						router.replace(`/editor/${newProjectId}`);
+						const isDesktop = Boolean(
+							(window as Window & { __TAURI__?: unknown }).__TAURI__,
+						);
+						router.replace(
+							isDesktop
+								? `/editor/desktop/?project_id=${encodeURIComponent(newProjectId)}`
+								: `/editor/${newProjectId}`,
+						);
 					} catch (_createErr) {
 						setError("Failed to create project");
 						setIsLoading(false);

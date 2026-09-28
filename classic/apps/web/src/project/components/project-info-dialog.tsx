@@ -8,8 +8,17 @@ import {
 } from "@/components/ui/dialog";
 import type { TProjectMetadata } from "@/project/types";
 import { formatDate } from "@/utils/date";
-import { formatTimecode, mediaTimeToSeconds } from "opencut-wasm";
 import { Button } from "@/components/ui/button";
+
+function formatDuration(duration: number): string {
+	const totalSeconds = Math.max(0, Math.floor(duration / 120_000));
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+	return hours > 0
+		? `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+		: `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
 
 function InfoRow({
 	label,
@@ -35,10 +44,9 @@ export function ProjectInfoDialog({
 	onOpenChange: (open: boolean) => void;
 	project: TProjectMetadata;
 }) {
-	const durationSeconds = mediaTimeToSeconds({ time: project.duration });
 	const durationFormatted =
 		project.duration > 0
-		? (formatTimecode({ time: project.duration, format: durationSeconds >= 3600 ? "HH:MM:SS" : "MM:SS" }) ?? "")
+		? formatDuration(project.duration)
 		: "0:00";
 
 	return (

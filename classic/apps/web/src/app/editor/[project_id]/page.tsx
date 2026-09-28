@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import {
 	ResizablePanelGroup,
 	ResizablePanel,
@@ -37,7 +37,12 @@ import {
 
 export default function Editor() {
 	const params = useParams();
-	const projectId = params.project_id as string;
+	const searchParams = useSearchParams();
+	const routeProjectId = params.project_id as string;
+	const projectId =
+		routeProjectId === "desktop"
+			? (searchParams.get("project_id") ?? "")
+			: routeProjectId;
 
 	return (
 		<MobileGate>

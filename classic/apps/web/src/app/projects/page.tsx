@@ -45,6 +45,15 @@ import {
 	ArrowDown02Icon,
 	InformationCircleIcon,
 } from "@hugeicons/core-free-icons";
+
+function editorPath(projectId: string): string {
+	const isDesktop =
+		typeof window !== "undefined" &&
+		Boolean((window as Window & { __TAURI__?: unknown }).__TAURI__);
+	return isDesktop
+		? `/editor/desktop/?project_id=${encodeURIComponent(projectId)}`
+		: `/editor/${projectId}`;
+}
 import { OcVideoIcon } from "@/components/icons";
 import { Label } from "@/components/ui/label";
 import {
@@ -163,7 +172,7 @@ function ProjectsHeader() {
 		if (typeof inputPath !== "string") return;
 		try {
 			const projectId = await editor.project.importDesktopProject({ inputPath });
-			router.push(`/editor/${projectId}`);
+			router.push(editorPath(projectId));
 		} catch (error) {
 			toast.error("Không thể mở project", {
 				description: error instanceof Error ? error.message : "File không hợp lệ",
@@ -577,7 +586,7 @@ function NewProjectButton() {
 		const projectId = await editor.project.createNewProject({
 			name: "New project",
 		});
-		router.push(`/editor/${projectId}`);
+		router.push(editorPath(projectId));
 	};
 
 	return (
@@ -729,7 +738,7 @@ function ProjectItem({
 				className="size-5 shrink-0"
 			/>
 
-			<Link href={`/editor/${project.id}`} className="flex-1 min-w-0">
+			<Link href={editorPath(project.id)} className="flex-1 min-w-0">
 				{listRowContent}
 			</Link>
 
@@ -754,7 +763,7 @@ function ProjectItem({
 					<div className="group relative">
 						{isGridView ? (
 							<>
-								<Link href={`/editor/${project.id}`} className="block">
+								<Link href={editorPath(project.id)} className="block">
 									{gridContent}
 								</Link>
 
@@ -1023,7 +1032,7 @@ function EmptyState() {
 			const projectId = await editor.project.createNewProject({
 				name: "New project",
 			});
-			router.push(`/editor/${projectId}`);
+			router.push(editorPath(projectId));
 		} catch (error) {
 			toast.error("Failed to create project", {
 				description:

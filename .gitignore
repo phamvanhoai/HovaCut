@@ -11,3 +11,4 @@ docs/
 .next/
 classic/apps/desktop/frontend/*
 !classic/apps/desktop/frontend/.gitkeep
+classic/apps/desktop-ui/out/

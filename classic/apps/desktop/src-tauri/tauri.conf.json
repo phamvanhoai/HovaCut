@@ -4,8 +4,8 @@
 	"version": "0.1.0",
 	"identifier": "vn.hova.hovacut",
 	"build": {
+		"beforeDevCommand": "powershell -ExecutionPolicy Bypass -File ../prepare-frontend.ps1",
 		"beforeBuildCommand": "powershell -ExecutionPolicy Bypass -File ../prepare-frontend.ps1",
-		"devUrl": "http://localhost:3000/automation",
 		"frontendDist": "../dist"
 	},
 	"app": {
@@ -13,7 +13,7 @@
 		"windows": [
 			{
 				"title": "HovaCut Desktop",
-				"url": "http://localhost:3000/automation",
+				"url": "automation/index.html",
 				"width": 1440,
 				"height": 900,
 				"minWidth": 1100,
@@ -29,9 +29,6 @@
 	"bundle": {
 		"active": true,
 		"targets": "all",
-		"icon": ["../../web/public/favicon.ico"],
-		"resources": {
-			"../frontend/": "frontend/"
-		}
+		"icon": ["../../web/public/favicon.ico"]
 	}
 }

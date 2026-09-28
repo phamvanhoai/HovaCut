@@ -154,8 +154,13 @@ export default function AutomationPage() {
 	const autoOtherInput = useRef<HTMLInputElement>(null);
 
 	useEffect(() => {
-		fetch("/api/automation/ffmpeg/status", { cache: "no-store" })
-			.then(async (response) => parseFfmpegStatus(await response.json()))
+		const statusPromise: Promise<unknown> = window.__TAURI__
+			? window.__TAURI__.core.invoke<FfmpegStatus>("get_ffmpeg_status")
+			: fetch("/api/automation/ffmpeg/status", { cache: "no-store" }).then(
+					(response) => response.json(),
+				);
+		statusPromise
+			.then((response) => parseFfmpegStatus(response))
 			.then((result) => setStatus(result))
 			.catch((reason: unknown) =>
 				setStatus({
