@@ -243,6 +243,9 @@ function ProjectsHeader() {
 				</div>
 
 				<div className="flex items-center gap-3 md:gap-4">
+					<span className="hidden text-[11px] text-muted-foreground xl:inline">
+						© 2026 HovaIT
+					</span>
 					<SearchBar className="hidden md:block" />
 					{isDesktop ? (
 						<Button variant="outline" size="lg" onClick={handleOpenProject}>

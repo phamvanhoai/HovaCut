@@ -35,6 +35,9 @@ export function EditorHeader() {
 				<EditableProjectName />
 			</div>
 			<nav className="flex items-center gap-2">
+				<span className="hidden text-[11px] text-muted-foreground xl:inline">
+					© 2026 HovaIT
+				</span>
 				<FeedbackPopover />
 				<ExportButton />
 				<ThemeToggle />

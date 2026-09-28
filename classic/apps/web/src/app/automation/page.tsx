@@ -1284,7 +1284,7 @@ export default function AutomationPage() {
 					<div>
 						<h1 className="text-lg font-semibold">HovaCut Automation</h1>
 						<p className="text-xs text-muted-foreground">
-							FFmpeg cho batch · OpenCut cho timeline
+							FFmpeg cho batch · OpenCut cho timeline · © 2026 HovaIT
 						</p>
 					</div>
 					<div className="ml-auto">

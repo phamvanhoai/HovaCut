@@ -5,7 +5,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 export const metadata = {
 	title: "HovaCut Desktop",
-	description: "Trình dựng video HovaCut chạy trực tiếp trên máy tính",
+	description: "Trình dựng video HovaCut của HovaIT chạy trực tiếp trên máy tính",
+	applicationName: "HovaCut Desktop",
+	authors: [{ name: "HovaIT" }],
+	creator: "HovaIT",
+	publisher: "HovaIT",
 };
 
 export default function DesktopLayout({ children }: { children: React.ReactNode }) {
