@@ -109,6 +109,247 @@ fn save_export_file(output_path: String, data: Vec<u8>) -> Result<String, String
     Ok(output_path)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtractFramesResult {
+    directory: String,
+    count: usize,
+}
+
+#[tauri::command]
+fn extract_video_frames(
+    input_path: String,
+    output_directory: String,
+    interval_seconds: f64,
+    format: String,
+) -> Result<ExtractFramesResult, String> {
+    if !Path::new(&input_path).is_file() {
+        return Err("Video nguồn không tồn tại.".into());
+    }
+    let extension = if format.eq_ignore_ascii_case("png") {
+        "png"
+    } else {
+        "jpg"
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let directory = PathBuf::from(output_directory).join(format!("frames-{stamp}"));
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let pattern = directory.join(format!("frame_%06d.{extension}"));
+    let interval = interval_seconds.clamp(0.1, 3600.0);
+    let mut command = Command::new(ffmpeg_path());
+    command.args([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        &input_path,
+        "-vf",
+        &format!("fps=1/{interval}"),
+        "-start_number",
+        "1",
+    ]);
+    if extension == "jpg" {
+        command.args(["-q:v", "2"]);
+    }
+    let output = command
+        .arg(&pattern)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let _ = fs::remove_dir_all(&directory);
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let count = fs::read_dir(&directory)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_file())
+        .count();
+    Ok(ExtractFramesResult {
+        directory: directory.to_string_lossy().into_owned(),
+        count,
+    })
+}
+
+#[tauri::command]
+fn join_video_files(
+    video_paths: Vec<String>,
+    output_path: String,
+    resolution: String,
+    encoder: String,
+) -> Result<String, String> {
+    if video_paths.len() < 2 || video_paths.iter().any(|path| !Path::new(path).is_file()) {
+        return Err("Cần ít nhất hai video nguồn hợp lệ.".into());
+    }
+    let (width, height) = if resolution == "4k" {
+        (3840, 2160)
+    } else {
+        (1920, 1080)
+    };
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let list_path = env::temp_dir().join(format!("hovacut-join-video-{stamp}.txt"));
+    let list = video_paths
+        .iter()
+        .map(|value| format!("file '{}'", value.replace('\\', "/").replace('\'', "'\\''")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&list_path, list).map_err(|error| error.to_string())?;
+    let video_encoder = resolve_h264_encoder(&encoder);
+    let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p");
+    let mut command = Command::new(ffmpeg_path());
+    command
+        .args(["-y", "-f", "concat", "-safe", "0", "-i"])
+        .arg(&list_path)
+        .args(["-vf", &filter, "-c:v", video_encoder]);
+    match video_encoder {
+        "h264_nvenc" => {
+            command.args(["-preset", "slow", "-rc", "vbr", "-cq", "20", "-b:v", "0"]);
+        }
+        "h264_qsv" => {
+            command.args(["-preset", "medium", "-global_quality", "20"]);
+        }
+        "h264_amf" => {
+            command.args([
+                "-quality", "quality", "-rc", "cqp", "-qp_i", "20", "-qp_p", "22", "-qp_b", "24",
+            ]);
+        }
+        _ => {
+            command.args(["-preset", "medium", "-crf", "20"]);
+        }
+    }
+    let result = command
+        .args([
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            &output_path,
+        ])
+        .output()
+        .map_err(|error| error.to_string());
+    let _ = fs::remove_file(list_path);
+    let output = result?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    Ok(output_path)
+}
+
+#[tauri::command]
+fn render_lofi_video(
+    background_path: String,
+    audio_path: String,
+    effect_path: Option<String>,
+    logo_path: Option<String>,
+    output_path: String,
+    resolution: String,
+    encoder: String,
+) -> Result<String, String> {
+    if !Path::new(&background_path).is_file() || !Path::new(&audio_path).is_file() {
+        return Err("Ảnh/video nền hoặc audio không tồn tại.".into());
+    }
+    let effect_path = effect_path.filter(|path| Path::new(path).is_file());
+    let logo_path = logo_path.filter(|path| Path::new(path).is_file());
+    let (width, height) = if resolution == "4k" {
+        (3840, 2160)
+    } else {
+        (1920, 1080)
+    };
+    let background_extension = Path::new(&background_path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let background_is_image = matches!(
+        background_extension.as_str(),
+        "png" | "jpg" | "jpeg" | "webp" | "bmp"
+    );
+    let mut command = Command::new(ffmpeg_path());
+    command.arg("-y");
+    if background_is_image {
+        command.args(["-loop", "1"]);
+    } else {
+        command.args(["-stream_loop", "-1"]);
+    }
+    command.args(["-i", &background_path]);
+    let mut next_input = 1usize;
+    let effect_index = effect_path.as_ref().map(|path| {
+        let index = next_input;
+        next_input += 1;
+        command.args(["-stream_loop", "-1", "-i", path]);
+        index
+    });
+    let logo_index = logo_path.as_ref().map(|path| {
+        let index = next_input;
+        next_input += 1;
+        command.args(["-stream_loop", "-1", "-i", path]);
+        index
+    });
+    let audio_index = next_input;
+    command.args(["-i", &audio_path]);
+    let mut filter = format!("[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p[base]");
+    let mut current = "base".to_owned();
+    if let Some(index) = effect_index {
+        filter.push_str(&format!(";[{index}:v]scale={width}:{height},fps=30,setsar=1,format=yuv420p[effect];[{current}][effect]blend=all_mode=screen:shortest=1[with_effect]"));
+        current = "with_effect".into();
+    }
+    if let Some(index) = logo_index {
+        filter.push_str(&format!(";[{index}:v]scale={width}:{height},fps=30,format=rgba[logo];[{current}][logo]overlay=0:0:shortest=1[with_logo]"));
+        current = "with_logo".into();
+    }
+    command.args([
+        "-filter_complex",
+        &filter,
+        "-map",
+        &format!("[{current}]"),
+        "-map",
+        &format!("{audio_index}:a:0"),
+    ]);
+    let video_encoder = resolve_h264_encoder(&encoder);
+    command.args(["-c:v", video_encoder]);
+    match video_encoder {
+        "h264_nvenc" => {
+            command.args(["-preset", "slow", "-rc", "vbr", "-cq", "20", "-b:v", "0"]);
+        }
+        "h264_qsv" => {
+            command.args(["-preset", "medium", "-global_quality", "20"]);
+        }
+        "h264_amf" => {
+            command.args([
+                "-quality", "quality", "-rc", "cqp", "-qp_i", "20", "-qp_p", "22", "-qp_b", "24",
+            ]);
+        }
+        _ => {
+            command.args(["-preset", "medium", "-crf", "20"]);
+        }
+    }
+    let output = command
+        .args([
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            "-movflags",
+            "+faststart",
+            &output_path,
+        ])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    Ok(output_path)
+}
+
 fn freesound_api_key() -> Result<String, String> {
     let path = application_data_directory()?.join("settings.json");
     if path.is_file() {
@@ -1534,7 +1775,10 @@ fn main() {
             search_sounds,
             save_freesound_api_key,
             inspect_media_file,
-            save_export_file
+            save_export_file,
+            extract_video_frames,
+            join_video_files,
+            render_lofi_video
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động HovaCut Desktop");

@@ -19,6 +19,7 @@ import {
 	Download,
 	FileCog,
 	ImageIcon,
+	Images,
 	ListMusic,
 	LoaderCircle,
 	Music2,
@@ -50,7 +51,10 @@ type ToolId =
 	| "auto-mp3"
 	| "image-audio"
 	| "convert"
-	| "join-audio";
+	| "join-audio"
+	| "video-frames"
+	| "join-video"
+	| "lofi-video";
 type TauriApi = {
 	core: {
 		invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -107,6 +111,24 @@ const TOOLS = [
 		description: "Tạo playlist",
 		icon: ListMusic,
 	},
+	{
+		id: "video-frames" as const,
+		label: "Video → Ảnh",
+		description: "Trích khung hình",
+		icon: Images,
+	},
+	{
+		id: "join-video" as const,
+		label: "Ghép / Random Video",
+		description: "Nối nhiều video",
+		icon: Clapperboard,
+	},
+	{
+		id: "lofi-video" as const,
+		label: "Lofi Video",
+		description: "Effect và logo",
+		icon: WandSparkles,
+	},
 ];
 
 export default function AutomationPage() {
@@ -139,6 +161,14 @@ export default function AutomationPage() {
 	const [desktopConvertPath, setDesktopConvertPath] = useState("");
 	const [desktopImagePath, setDesktopImagePath] = useState("");
 	const [desktopImageAudioPath, setDesktopImageAudioPath] = useState("");
+	const [desktopFramesVideoPath, setDesktopFramesVideoPath] = useState("");
+	const [desktopFramesOutputFolder, setDesktopFramesOutputFolder] = useState("");
+	const [desktopJoinVideoFiles, setDesktopJoinVideoFiles] = useState<DesktopAudio[]>([]);
+	const [desktopPinnedVideoPaths, setDesktopPinnedVideoPaths] = useState<string[]>([]);
+	const [desktopLofiBackground, setDesktopLofiBackground] = useState("");
+	const [desktopLofiAudio, setDesktopLofiAudio] = useState("");
+	const [desktopLofiEffect, setDesktopLofiEffect] = useState("");
+	const [desktopLofiLogo, setDesktopLofiLogo] = useState("");
 	const [desktopVideoEncoders, setDesktopVideoEncoders] = useState<string[]>(
 		[],
 	);
@@ -515,6 +545,194 @@ export default function AutomationPage() {
 			setError(
 				typeof reason === "string" ? reason : "Convert desktop thất bại.",
 			);
+		} finally {
+			setActiveJob(null);
+		}
+	};
+	const chooseFramesVideo = async () => {
+		const path = await window.__TAURI__?.dialog.open({
+			multiple: false,
+			directory: false,
+			filters: [
+				{
+					name: "Video",
+					extensions: ["mp4", "mov", "mkv", "webm", "avi", "m4v"],
+				},
+			],
+		});
+		if (typeof path === "string") setDesktopFramesVideoPath(path);
+	};
+	const chooseFramesOutputFolder = async () => {
+		const path = await window.__TAURI__?.dialog.open({
+			multiple: false,
+			directory: true,
+		});
+		if (typeof path === "string") setDesktopFramesOutputFolder(path);
+	};
+	const handleExtractVideoFrames = async (
+		event: FormEvent<HTMLFormElement>,
+	) => {
+		event.preventDefault();
+		if (
+			!window.__TAURI__ ||
+			!desktopFramesVideoPath ||
+			!desktopFramesOutputFolder
+		)
+			return;
+		const data = new FormData(event.currentTarget);
+		const intervalSeconds = Number(data.get("interval") ?? 5);
+		const format = String(data.get("image-format") ?? "jpg");
+		setError(null);
+		setActiveJob("video-frames");
+		try {
+			const result = await window.__TAURI__.core.invoke<{
+				directory: string;
+				count: number;
+			}>("extract_video_frames", {
+				inputPath: desktopFramesVideoPath,
+				outputDirectory: desktopFramesOutputFolder,
+				intervalSeconds,
+				format,
+			});
+			setJobs((current) => [
+				{
+					id: crypto.randomUUID(),
+					filename: `${result.count} ảnh · ${result.directory}`,
+					url: "",
+					createdAt: new Date(),
+				},
+				...current,
+			]);
+		} catch (reason) {
+			setError(
+				typeof reason === "string"
+					? reason
+					: "Không thể trích khung hình từ video.",
+			);
+		} finally {
+			setActiveJob(null);
+		}
+	};
+	const chooseDesktopJoinVideos = async () => {
+		const selected = await window.__TAURI__?.dialog.open({
+			multiple: true,
+			directory: false,
+			filters: [
+				{
+					name: "Video",
+					extensions: ["mp4", "mov", "mkv", "webm", "avi", "m4v"],
+				},
+			],
+		});
+		const paths = typeof selected === "string" ? [selected] : selected;
+		if (!paths?.length || !window.__TAURI__) return;
+		const additions = await Promise.all(
+			paths.map(async (path) => {
+				const info = await window.__TAURI__!.core.invoke<{
+					name: string;
+					size: number;
+					lastModified: number;
+				}>("inspect_media_file", { path });
+				return { path, name: info.name, size: info.size, lastModified: info.lastModified };
+			}),
+		);
+		setDesktopJoinVideoFiles((current) => {
+			const existing = new Set(current.map((file) => file.path));
+			return [
+				...current,
+				...additions.filter((file) => !existing.has(file.path)),
+			].slice(0, 50);
+		});
+	};
+	const handleJoinVideos = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (!window.__TAURI__ || desktopJoinVideoFiles.length < 2) return;
+		const data = new FormData(event.currentTarget);
+		const resolution = String(data.get("resolution") ?? "1080p");
+		const encoder = String(data.get("encoder") ?? "auto");
+		const outputPath = await window.__TAURI__.dialog.save({
+			defaultPath: "hovacut-joined-video.mp4",
+			filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
+		});
+		if (!outputPath) return;
+		setError(null);
+		setActiveJob("join-video");
+		try {
+			await window.__TAURI__.core.invoke("join_video_files", {
+				videoPaths: desktopJoinVideoFiles.map((file) => file.path),
+				outputPath,
+				resolution,
+				encoder,
+			});
+			setJobs((current) => [
+				{
+					id: crypto.randomUUID(),
+					filename: outputPath.split(/[\\/]/).pop() ?? outputPath,
+					url: "",
+					createdAt: new Date(),
+				},
+				...current,
+			]);
+		} catch (reason) {
+			setError(typeof reason === "string" ? reason : "Ghép video thất bại.");
+		} finally {
+			setActiveJob(null);
+		}
+	};
+	const chooseLofiFile = async (
+		kind: "background" | "audio" | "effect" | "logo",
+	) => {
+		const filters =
+			kind === "audio"
+				? [{ name: "Audio", extensions: ["mp3", "wav", "m4a", "aac", "flac", "ogg"] }]
+				: kind === "background"
+					? [{ name: "Ảnh hoặc video", extensions: ["jpg", "jpeg", "png", "webp", "bmp", "mp4", "mov", "mkv", "webm"] }]
+					: [{ name: "Video overlay", extensions: ["mp4", "mov", "mkv", "webm"] }];
+		const path = await window.__TAURI__?.dialog.open({
+			multiple: false,
+			directory: false,
+			filters,
+		});
+		if (typeof path !== "string") return;
+		if (kind === "background") setDesktopLofiBackground(path);
+		else if (kind === "audio") setDesktopLofiAudio(path);
+		else if (kind === "effect") setDesktopLofiEffect(path);
+		else setDesktopLofiLogo(path);
+	};
+	const handleRenderLofi = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (!window.__TAURI__ || !desktopLofiBackground || !desktopLofiAudio) return;
+		const data = new FormData(event.currentTarget);
+		const resolution = String(data.get("resolution") ?? "1080p");
+		const encoder = String(data.get("encoder") ?? "auto");
+		const outputPath = await window.__TAURI__.dialog.save({
+			defaultPath: "hovacut-lofi.mp4",
+			filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
+		});
+		if (!outputPath) return;
+		setError(null);
+		setActiveJob("lofi-video");
+		try {
+			await window.__TAURI__.core.invoke("render_lofi_video", {
+				backgroundPath: desktopLofiBackground,
+				audioPath: desktopLofiAudio,
+				effectPath: desktopLofiEffect || null,
+				logoPath: desktopLofiLogo || null,
+				outputPath,
+				resolution,
+				encoder,
+			});
+			setJobs((current) => [
+				{
+					id: crypto.randomUUID(),
+					filename: outputPath.split(/[\\/]/).pop() ?? outputPath,
+					url: "",
+					createdAt: new Date(),
+				},
+				...current,
+			]);
+		} catch (reason) {
+			setError(typeof reason === "string" ? reason : "Render Lofi thất bại.");
 		} finally {
 			setActiveJob(null);
 		}
@@ -1388,6 +1606,204 @@ export default function AutomationPage() {
 							</form>
 						</ToolCard>
 					)}
+					{selectedTool === "video-frames" && (
+						<ToolCard
+							title="Video → Ảnh"
+							description="Trích khung hình từ video theo khoảng thời gian, tương tự VideoToImage của CGT."
+							icon={<Images />}
+						>
+							<form className="space-y-5" onSubmit={handleExtractVideoFrames}>
+								<div className="grid gap-4 sm:grid-cols-2">
+									<DesktopPathField
+										label="Video nguồn"
+										value={desktopFramesVideoPath}
+										action="Chọn video"
+										onChoose={() => void chooseFramesVideo()}
+										icon={<Clapperboard />}
+									/>
+									<DesktopPathField
+										label="Thư mục lưu ảnh"
+										value={desktopFramesOutputFolder}
+										action="Chọn thư mục"
+										onChoose={() => void chooseFramesOutputFolder()}
+										icon={<Images />}
+									/>
+								</div>
+								<div className="grid gap-4 sm:grid-cols-2">
+									<NumberField
+										name="interval"
+										label="Mỗi bao nhiêu giây lấy một ảnh"
+										value={5}
+										min={1}
+										max={3600}
+									/>
+									<SelectField
+										id="image-format"
+										name="image-format"
+										label="Định dạng ảnh"
+										options={[
+											{ value: "jpg", label: "JPG · chất lượng cao" },
+											{ value: "png", label: "PNG · không mất dữ liệu" },
+										]}
+									/>
+								</div>
+								<p className="text-sm text-muted-foreground">
+									HovaCut tạo thư mục frames mới để không ghi đè ảnh cũ.
+								</p>
+								<SubmitButton
+									busy={activeJob === "video-frames"}
+									disabled={
+										activeJob !== null ||
+										!desktopMode ||
+										!desktopFramesVideoPath ||
+										!desktopFramesOutputFolder
+									}
+									label="Trích xuất ảnh"
+									icon={<Images />}
+								/>
+							</form>
+						</ToolCard>
+					)}
+					{selectedTool === "join-video" && (
+						<ToolCard
+							title="Ghép / Random Video"
+							description="Sắp xếp hoặc xáo trộn nhiều video rồi nối thành một MP4. Có thể chọn bổ sung nhiều lần."
+							icon={<Clapperboard />}
+						>
+							<form className="space-y-5" onSubmit={handleJoinVideos}>
+								<Button
+									type="button"
+									variant="outline"
+									className="h-24 w-full border-dashed"
+									onClick={() => void chooseDesktopJoinVideos()}
+								>
+									<Clapperboard />{" "}
+									{desktopJoinVideoFiles.length
+										? `Chọn thêm video · đang có ${desktopJoinVideoFiles.length}/50 file`
+										: "Chọn nhiều file video"}
+								</Button>
+								<DesktopPlaylistEditor
+									files={desktopJoinVideoFiles}
+									pinnedPaths={desktopPinnedVideoPaths}
+									onFilesChange={setDesktopJoinVideoFiles}
+									onPinnedChange={setDesktopPinnedVideoPaths}
+									itemLabel="video"
+								/>
+								<div className="grid gap-4 sm:grid-cols-2">
+									<SelectField
+										id="join-video-resolution"
+										name="resolution"
+										label="Độ phân giải"
+										options={[
+											{ value: "1080p", label: "Full HD · 1920×1080" },
+											{ value: "4k", label: "4K · 3840×2160" },
+										]}
+									/>
+									<SelectField
+										id="join-video-encoder"
+										name="encoder"
+										label="Bộ mã hóa"
+										options={[
+											{ value: "auto", label: "CPU · tương thích" },
+											...desktopVideoEncoders.map((value) => ({
+												value,
+												label:
+													value === "nvidia"
+														? "NVIDIA · NVENC"
+														: value === "intel"
+															? "Intel · Quick Sync"
+															: "AMD · AMF",
+											})),
+										]}
+									/>
+								</div>
+								<SubmitButton
+									busy={activeJob === "join-video"}
+									disabled={activeJob !== null || desktopJoinVideoFiles.length < 2}
+									label="Ghép video"
+									icon={<Clapperboard />}
+								/>
+							</form>
+						</ToolCard>
+					)}
+					{selectedTool === "lofi-video" && (
+						<ToolCard
+							title="Lofi Video"
+							description="Tạo video dài theo audio, có thể phủ effect nền đen và logo alpha giống nhóm Lofi của CGT."
+							icon={<WandSparkles />}
+						>
+							<form className="space-y-5" onSubmit={handleRenderLofi}>
+								<div className="grid gap-4 sm:grid-cols-2">
+									<DesktopPathField
+										label="Ảnh hoặc video nền"
+										value={desktopLofiBackground}
+										action="Chọn nền"
+										onChoose={() => void chooseLofiFile("background")}
+										icon={<ImageIcon />}
+									/>
+									<DesktopPathField
+										label="Audio"
+										value={desktopLofiAudio}
+										action="Chọn audio"
+										onChoose={() => void chooseLofiFile("audio")}
+										icon={<Music2 />}
+									/>
+									<DesktopPathField
+										label="Effect tùy chọn"
+										value={desktopLofiEffect}
+										detail={desktopLofiEffect || "Không dùng effect"}
+										action="Chọn effect"
+										onChoose={() => void chooseLofiFile("effect")}
+										icon={<WandSparkles />}
+									/>
+									<DesktopPathField
+										label="Logo alpha tùy chọn"
+										value={desktopLofiLogo}
+										detail={desktopLofiLogo || "Không dùng logo"}
+										action="Chọn logo"
+										onChoose={() => void chooseLofiFile("logo")}
+										icon={<ImageIcon />}
+									/>
+								</div>
+								{desktopLofiEffect || desktopLofiLogo ? (
+									<div className="flex flex-wrap gap-2">
+										{desktopLofiEffect ? (
+											<Button type="button" variant="outline" size="sm" onClick={() => setDesktopLofiEffect("")}>Bỏ effect</Button>
+										) : null}
+										{desktopLofiLogo ? (
+											<Button type="button" variant="outline" size="sm" onClick={() => setDesktopLofiLogo("")}>Bỏ logo</Button>
+										) : null}
+									</div>
+								) : null}
+								<div className="grid gap-4 sm:grid-cols-2">
+									<SelectField
+										id="lofi-resolution"
+										name="resolution"
+										label="Độ phân giải"
+										options={[
+											{ value: "1080p", label: "Full HD · 1920×1080" },
+											{ value: "4k", label: "4K · 3840×2160" },
+										]}
+									/>
+									<SelectField
+										id="lofi-encoder"
+										name="encoder"
+										label="Bộ mã hóa"
+										options={[
+											{ value: "auto", label: "CPU · tương thích" },
+											...desktopVideoEncoders.map((value) => ({ value, label: value === "nvidia" ? "NVIDIA · NVENC" : value === "intel" ? "Intel · Quick Sync" : "AMD · AMF" })),
+										]}
+									/>
+								</div>
+								<SubmitButton
+									busy={activeJob === "lofi-video"}
+									disabled={activeJob !== null || !desktopLofiBackground || !desktopLofiAudio}
+									label="Render Lofi"
+									icon={<WandSparkles />}
+								/>
+							</form>
+						</ToolCard>
+					)}
 				</section>
 
 				<aside className="h-fit rounded-lg border bg-background lg:sticky lg:top-4">
@@ -1848,11 +2264,13 @@ function DesktopPlaylistEditor({
 	pinnedPaths,
 	onFilesChange,
 	onPinnedChange,
+	itemLabel = "bài",
 }: {
 	files: DesktopAudio[];
 	pinnedPaths: string[];
 	onFilesChange: (files: DesktopAudio[]) => void;
 	onPinnedChange: (paths: string[]) => void;
+	itemLabel?: string;
 }) {
 	const move = ({ index, target }: { index: number; target: number }) => {
 		if (target < 0 || target >= files.length) return;
@@ -1885,7 +2303,7 @@ function DesktopPlaylistEditor({
 		<div className="overflow-hidden rounded-md border">
 			<div className="flex items-center justify-between border-b bg-muted/40 px-3 py-2">
 				<p className="text-sm font-medium">
-					Danh sách phát · {files.length} bài
+					Danh sách · {files.length} {itemLabel}
 				</p>
 				<div className="flex gap-2">
 					<Button
@@ -1914,7 +2332,7 @@ function DesktopPlaylistEditor({
 			<div className="max-h-[420px] overflow-y-auto">
 				{files.length === 0 ? (
 					<p className="p-8 text-center text-sm text-muted-foreground">
-						Chưa có bài hát trong danh sách.
+						Chưa có {itemLabel} trong danh sách.
 					</p>
 				) : (
 					files.map((file, index) => {
