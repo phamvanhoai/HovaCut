@@ -160,6 +160,7 @@ export default function AutomationPage() {
 	const [desktopAudioPath, setDesktopAudioPath] = useState("");
 	const [desktopVideoFolder, setDesktopVideoFolder] = useState("");
 	const [desktopVideoPaths, setDesktopVideoPaths] = useState<string[]>([]);
+	const [desktopAutoVideoLogo, setDesktopAutoVideoLogo] = useState("");
 	const [desktopGoodFolder, setDesktopGoodFolder] = useState("");
 	const [desktopOtherFolder, setDesktopOtherFolder] = useState("");
 	const [desktopGoodPaths, setDesktopGoodPaths] = useState<string[]>([]);
@@ -1082,6 +1083,19 @@ export default function AutomationPage() {
 		setDesktopVideoFolder(folder);
 		setDesktopVideoPaths(paths);
 	};
+	const chooseAutoVideoLogo = async () => {
+		const path = await window.__TAURI__?.dialog.open({
+			multiple: false,
+			directory: false,
+			filters: [
+				{
+					name: "Logo overlay",
+					extensions: ["png", "webp", "jpg", "jpeg", "bmp", "mov", "mp4", "webm"],
+				},
+			],
+		});
+		if (typeof path === "string") setDesktopAutoVideoLogo(path);
+	};
 	const handleDesktopAutoVideo = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (
@@ -1090,11 +1104,10 @@ export default function AutomationPage() {
 			desktopVideoPaths.length === 0
 		)
 			return setError("Chọn audio và thư mục video.");
-		const resolution = String(
-			new FormData(event.currentTarget).get("resolution") ?? "1080p",
-		);
+		const formData = new FormData(event.currentTarget);
+		const resolution = String(formData.get("resolution") ?? "1080p");
 		const requestedEncoder = String(
-			new FormData(event.currentTarget).get("encoder") ?? "auto",
+			formData.get("encoder") ?? "auto",
 		);
 		const encoder =
 			requestedEncoder === "auto"
@@ -1111,6 +1124,10 @@ export default function AutomationPage() {
 			await window.__TAURI__.core.invoke("render_auto_video", {
 				audioPath: desktopAudioPath,
 				videoPaths: desktopVideoPaths,
+				logoPath: desktopAutoVideoLogo || null,
+				logoMode: String(formData.get("logo-mode") ?? "corner"),
+				logoPosition: String(formData.get("logo-position") ?? "top-right"),
+				logoWidthPercent: Number(formData.get("logo-width") ?? 18),
 				outputPath,
 				resolution,
 				encoder,
@@ -1411,6 +1428,55 @@ export default function AutomationPage() {
 										<MultiMediaField inputRef={backgroundsInput} />
 									</>
 								)}
+								{desktopMode ? (
+									<div className="space-y-4 rounded-md border p-4">
+										<div className="flex items-center justify-between gap-3">
+											<div>
+												<h3 className="text-sm font-medium">Logo overlay · tùy chọn</h3>
+												<p className="text-xs text-muted-foreground">PNG/WebP hoặc MOV có nền trong suốt.</p>
+											</div>
+											<div className="flex gap-2">
+												<Button type="button" variant="outline" size="sm" onClick={() => void chooseAutoVideoLogo()}>
+													Chọn logo
+												</Button>
+												{desktopAutoVideoLogo ? (
+													<Button type="button" variant="ghost" size="sm" onClick={() => setDesktopAutoVideoLogo("")}>
+														Bỏ logo
+													</Button>
+												) : null}
+											</div>
+										</div>
+										<p className="truncate text-xs text-muted-foreground">
+											{desktopAutoVideoLogo || "Chưa chọn logo"}
+										</p>
+										{desktopAutoVideoLogo ? (
+											<div className="grid gap-4 sm:grid-cols-3">
+												<SelectField
+													id="auto-logo-mode"
+													name="logo-mode"
+													label="Kiểu logo"
+													options={[
+														{ value: "full", label: "Toàn khung · như CGT" },
+														{ value: "corner", label: "Logo góc" },
+													]}
+												/>
+												<SelectField
+													id="auto-logo-position"
+													name="logo-position"
+													label="Vị trí logo góc"
+													options={[
+														{ value: "top-right", label: "Trên phải" },
+														{ value: "top-left", label: "Trên trái" },
+														{ value: "bottom-right", label: "Dưới phải" },
+														{ value: "bottom-left", label: "Dưới trái" },
+														{ value: "center", label: "Chính giữa" },
+													]}
+												/>
+												<NumberField name="logo-width" label="Chiều rộng logo (%)" value={18} min={5} max={80} />
+											</div>
+										) : null}
+									</div>
+								) : null}
 								<div
 									className={`grid gap-4 ${desktopMode ? "sm:grid-cols-2" : ""}`}
 								>

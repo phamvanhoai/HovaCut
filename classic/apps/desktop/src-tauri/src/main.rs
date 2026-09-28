@@ -1444,6 +1444,10 @@ fn cancel_native_timeline() {
 fn render_auto_video(
     audio_path: String,
     video_paths: Vec<String>,
+    logo_path: Option<String>,
+    logo_mode: Option<String>,
+    logo_position: Option<String>,
+    logo_width_percent: Option<f64>,
     output_path: String,
     resolution: String,
     encoder: String,
@@ -1476,6 +1480,7 @@ fn render_auto_video(
         .collect::<Vec<_>>()
         .join("\n");
     fs::write(&list_path, list).map_err(|error| error.to_string())?;
+    let logo_path = logo_path.filter(|value| Path::new(value).is_file());
     let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p");
     let video_encoder = resolve_h264_encoder(&encoder);
     let mut command = Command::new(ffmpeg_path());
@@ -1490,19 +1495,58 @@ fn render_auto_video(
             "0",
             "-i",
         ])
-        .arg(&list_path)
-        .args([
-            "-i",
-            &audio_path,
+        .arg(&list_path);
+    let audio_index = if let Some(path) = &logo_path {
+        let extension = Path::new(path)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "webp" | "bmp") {
+            command.args(["-loop", "1", "-i", path]);
+        } else {
+            command.args(["-stream_loop", "-1", "-i", path]);
+        }
+        2
+    } else {
+        1
+    };
+    command.args(["-i", &audio_path]);
+    if logo_path.is_some() {
+        let logo_filter = if logo_mode.as_deref() == Some("full") {
+            format!("[0:v]{filter}[base];[1:v]scale={width}:{height},fps=30,format=rgba[logo];[base][logo]overlay=0:0:shortest=1[outv]")
+        } else {
+            let logo_width = ((width as f64)
+                * (logo_width_percent.unwrap_or(18.0).clamp(5.0, 80.0) / 100.0))
+                .round() as u32;
+            let (x, y) = match logo_position.as_deref() {
+                Some("top-left") => ("24", "24"),
+                Some("bottom-left") => ("24", "H-h-24"),
+                Some("bottom-right") => ("W-w-24", "H-h-24"),
+                Some("center") => ("(W-w)/2", "(H-h)/2"),
+                _ => ("W-w-24", "24"),
+            };
+            format!("[0:v]{filter}[base];[1:v]scale={logo_width}:-1,fps=30,format=rgba[logo];[base][logo]overlay={x}:{y}:shortest=1[outv]")
+        };
+        command.args([
+            "-filter_complex",
+            &logo_filter,
+            "-map",
+            "[outv]",
+            "-map",
+            &format!("{audio_index}:a:0"),
+        ]);
+    } else {
+        command.args([
             "-map",
             "0:v:0",
             "-map",
-            "1:a:0",
+            &format!("{audio_index}:a:0"),
             "-vf",
             &filter,
-            "-c:v",
-            video_encoder,
         ]);
+    }
+    command.args(["-c:v", video_encoder]);
     match video_encoder {
         "h264_nvenc" => {
             command.args(["-preset", "slow", "-rc", "vbr", "-cq", "20", "-b:v", "0"]);
