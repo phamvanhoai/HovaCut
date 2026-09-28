@@ -91,6 +91,8 @@ function buildTrackNodes({
 					nodes.push(
 						new ImageNode({
 							url: mediaAsset.url,
+							sourcePath: mediaAsset.sourcePath,
+							fileSize: mediaAsset.nativeFileSize,
 							duration: element.duration,
 							timeOffset: element.startTime,
 							trimStart: element.trimStart,
