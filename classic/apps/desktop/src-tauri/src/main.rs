@@ -148,8 +148,88 @@ fn projects_directory() -> Result<PathBuf, String> {
     Ok(directory)
 }
 
+fn validate_storage_id(value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || !value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
+    {
+        return Err("ID lưu trữ không hợp lệ.".into());
+    }
+    Ok(())
+}
+
+fn media_metadata_path(project_id: &str) -> Result<PathBuf, String> {
+    validate_storage_id(project_id)?;
+    Ok(projects_directory()?.join(format!("{project_id}.media.json")))
+}
+
+fn read_media_metadata(project_id: &str) -> Result<Vec<Value>, String> {
+    let path = media_metadata_path(project_id)?;
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read(path).map_err(|error| error.to_string())?;
+    serde_json::from_slice(&content).map_err(|error| error.to_string())
+}
+
+fn write_media_metadata(project_id: &str, items: &[Value]) -> Result<(), String> {
+    let content = serde_json::to_vec_pretty(items).map_err(|error| error.to_string())?;
+    fs::write(media_metadata_path(project_id)?, content).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_media_metadata(project_id: String, metadata: Value) -> Result<(), String> {
+    let media_id = metadata
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Metadata media thiếu ID.".to_string())?;
+    validate_storage_id(media_id)?;
+    let mut items = read_media_metadata(&project_id)?;
+    if let Some(existing) = items
+        .iter_mut()
+        .find(|item| item.get("id").and_then(Value::as_str) == Some(media_id))
+    {
+        *existing = metadata;
+    } else {
+        items.push(metadata);
+    }
+    write_media_metadata(&project_id, &items)
+}
+
+#[tauri::command]
+fn load_media_metadata(project_id: String, media_id: String) -> Result<Option<Value>, String> {
+    validate_storage_id(&media_id)?;
+    Ok(read_media_metadata(&project_id)?
+        .into_iter()
+        .find(|item| item.get("id").and_then(Value::as_str) == Some(media_id.as_str())))
+}
+
+#[tauri::command]
+fn list_media_metadata(project_id: String) -> Result<Vec<Value>, String> {
+    read_media_metadata(&project_id)
+}
+
+#[tauri::command]
+fn delete_media_metadata(project_id: String, media_id: String) -> Result<(), String> {
+    validate_storage_id(&media_id)?;
+    let mut items = read_media_metadata(&project_id)?;
+    items.retain(|item| item.get("id").and_then(Value::as_str) != Some(media_id.as_str()));
+    write_media_metadata(&project_id, &items)
+}
+
+#[tauri::command]
+fn clear_media_metadata(project_id: String) -> Result<(), String> {
+    let path = media_metadata_path(&project_id)?;
+    if path.is_file() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn save_project_json(project_id: String, project: Value) -> Result<String, String> {
+    validate_storage_id(&project_id)?;
     let path = projects_directory()?.join(format!("{project_id}.hovacut.json"));
     let content = serde_json::to_vec_pretty(&project).map_err(|error| error.to_string())?;
     fs::write(&path, content).map_err(|error| error.to_string())?;
@@ -158,6 +238,7 @@ fn save_project_json(project_id: String, project: Value) -> Result<String, Strin
 
 #[tauri::command]
 fn load_project_json(project_id: String) -> Result<Option<Value>, String> {
+    validate_storage_id(&project_id)?;
     let path = projects_directory()?.join(format!("{project_id}.hovacut.json"));
     if !path.is_file() {
         return Ok(None);
@@ -169,10 +250,50 @@ fn load_project_json(project_id: String) -> Result<Option<Value>, String> {
 }
 
 #[tauri::command]
+fn list_project_jsons() -> Result<Vec<Value>, String> {
+    let directory = projects_directory()?;
+    let mut projects = Vec::new();
+    for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if !path.is_file()
+            || path.extension().and_then(|value| value.to_str()) != Some("json")
+            || !path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.ends_with(".hovacut.json"))
+        {
+            continue;
+        }
+        let content = fs::read(&path).map_err(|error| error.to_string())?;
+        match serde_json::from_slice::<Value>(&content) {
+            Ok(project) => projects.push(project),
+            Err(error) => eprintln!("Skipping invalid project {}: {error}", path.display()),
+        }
+    }
+    projects.sort_by(|left, right| {
+        let updated = |project: &Value| {
+            project
+                .get("metadata")
+                .and_then(|metadata| metadata.get("updatedAt"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        updated(right).cmp(&updated(left))
+    });
+    Ok(projects)
+}
+
+#[tauri::command]
 fn delete_project_json(project_id: String) -> Result<(), String> {
+    validate_storage_id(&project_id)?;
     let path = projects_directory()?.join(format!("{project_id}.hovacut.json"));
     if path.is_file() {
         fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    let media_path = media_metadata_path(&project_id)?;
+    if media_path.is_file() {
+        fs::remove_file(media_path).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -1089,7 +1210,13 @@ fn main() {
             list_media_files,
             save_project_json,
             load_project_json,
+            list_project_jsons,
             delete_project_json,
+            save_media_metadata,
+            load_media_metadata,
+            list_media_metadata,
+            delete_media_metadata,
+            clear_media_metadata,
             import_project_json,
             export_project_json,
             detect_video_encoders,

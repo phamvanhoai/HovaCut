@@ -50,6 +50,13 @@ function desktopInvoke<T>({
 	);
 }
 
+function hasDesktopStorage(): boolean {
+	return (
+		typeof window !== "undefined" &&
+		Boolean((window as DesktopWindow).__TAURI__?.core.invoke)
+	);
+}
+
 function normalizeBookmarks({ raw }: { raw: unknown }): Bookmark[] {
 	if (!Array.isArray(raw)) return [];
 	return raw
@@ -105,6 +112,7 @@ class StorageService {
 	}
 
 	private async ensureMigrations(): Promise<void> {
+		if (hasDesktopStorage()) return;
 		if (this.migrationsPromise) {
 			await this.migrationsPromise;
 			return;
@@ -187,17 +195,16 @@ class StorageService {
 			timelineViewState: project.timelineViewState,
 		};
 
-		await this.projectsAdapter.set({
-			key: project.metadata.id,
-			value: serializedProject,
-		});
-		try {
+		if (hasDesktopStorage()) {
 			await desktopInvoke({
 				command: "save_project_json",
 				args: { projectId: project.metadata.id, project: serializedProject },
 			});
-		} catch (error) {
-			console.error("Failed to mirror project to desktop storage:", error);
+		} else {
+			await this.projectsAdapter.set({
+				key: project.metadata.id,
+				value: serializedProject,
+			});
 		}
 	}
 
@@ -207,18 +214,14 @@ class StorageService {
 		id: string;
 	}): Promise<{ project: TProject } | null> {
 		await this.ensureMigrations();
-		let serializedProject = await this.projectsAdapter.get(id);
-		if (!serializedProject) {
-			try {
-				serializedProject = await desktopInvoke<SerializedProject | null>({
+		let serializedProject: SerializedProject | null;
+		if (hasDesktopStorage()) {
+			serializedProject = await desktopInvoke<SerializedProject | null>({
 					command: "load_project_json",
 					args: { projectId: id },
 				});
-				if (serializedProject)
-					await this.projectsAdapter.set({ key: id, value: serializedProject });
-			} catch (error) {
-				console.error("Failed to restore project from desktop storage:", error);
-			}
+		} else {
+			serializedProject = await this.projectsAdapter.get(id);
 		}
 
 		if (!serializedProject) return null;
@@ -271,7 +274,14 @@ class StorageService {
 	}
 
 	async loadAllProjects(): Promise<TProject[]> {
-		const projectIds = await this.projectsAdapter.list();
+		const projectIds = hasDesktopStorage()
+			? (
+					(await desktopInvoke<SerializedProject[]>({
+						command: "list_project_jsons",
+						args: {},
+					})) ?? []
+				).map((project) => project.metadata.id)
+			: await this.projectsAdapter.list();
 		const projects: TProject[] = [];
 
 		for (const id of projectIds) {
@@ -288,7 +298,12 @@ class StorageService {
 
 	async loadAllProjectsMetadata(): Promise<TProjectMetadata[]> {
 		await this.ensureMigrations();
-		const serializedProjects = await this.projectsAdapter.getAll();
+		const serializedProjects = hasDesktopStorage()
+			? ((await desktopInvoke<SerializedProject[]>({
+					command: "list_project_jsons",
+					args: {},
+				})) ?? [])
+			: await this.projectsAdapter.getAll();
 
 		const metadata: TProjectMetadata[] = [];
 		for (const serializedProject of serializedProjects) {
@@ -327,14 +342,13 @@ class StorageService {
 	}
 
 	async deleteProject({ id }: { id: string }): Promise<void> {
-		await this.projectsAdapter.remove(id);
-		try {
+		if (hasDesktopStorage()) {
 			await desktopInvoke({
 				command: "delete_project_json",
 				args: { projectId: id },
 			});
-		} catch (error) {
-			console.error("Failed to delete desktop project file:", error);
+		} else {
+			await this.projectsAdapter.remove(id);
 		}
 	}
 
@@ -352,19 +366,35 @@ class StorageService {
 		if (!serializedProject?.metadata?.id) {
 			throw new Error("File project không hợp lệ.");
 		}
-		await this.projectsAdapter.set({
-			key: serializedProject.metadata.id,
-			value: serializedProject,
-		});
-		if (serializedProject.desktopMedia?.length) {
-			const { mediaMetadataAdapter } = this.getProjectMediaAdapters({
-				projectId: serializedProject.metadata.id,
+		if (!hasDesktopStorage()) {
+			await this.projectsAdapter.set({
+				key: serializedProject.metadata.id,
+				value: serializedProject,
 			});
-			await Promise.all(
-				serializedProject.desktopMedia.map((metadata) =>
-					mediaMetadataAdapter.set({ key: metadata.id, value: metadata }),
-				),
-			);
+		}
+		if (serializedProject.desktopMedia?.length) {
+			if (hasDesktopStorage()) {
+				await Promise.all(
+					serializedProject.desktopMedia.map((metadata) =>
+						desktopInvoke({
+							command: "save_media_metadata",
+							args: {
+								projectId: serializedProject.metadata.id,
+								metadata,
+							},
+						}),
+					),
+				);
+			} else {
+				const { mediaMetadataAdapter } = this.getProjectMediaAdapters({
+					projectId: serializedProject.metadata.id,
+				});
+				await Promise.all(
+					serializedProject.desktopMedia.map((metadata) =>
+						mediaMetadataAdapter.set({ key: metadata.id, value: metadata }),
+					),
+				);
+			}
 		}
 		return serializedProject.metadata.id;
 	}
@@ -376,10 +406,14 @@ class StorageService {
 		id: string;
 		outputPath: string;
 	}): Promise<void> {
-		const { mediaMetadataAdapter } = this.getProjectMediaAdapters({
-			projectId: id,
-		});
-		const mediaAssets = await mediaMetadataAdapter.getAll();
+		const mediaAssets = hasDesktopStorage()
+			? ((await desktopInvoke<MediaAssetData[]>({
+					command: "list_media_metadata",
+					args: { projectId: id },
+				})) ?? [])
+			: await this.getProjectMediaAdapters({
+					projectId: id,
+				}).mediaMetadataAdapter.getAll();
 		await desktopInvoke({
 			command: "export_project_json",
 			args: { projectId: id, outputPath, mediaAssets },
@@ -418,10 +452,17 @@ class StorageService {
 					value: mediaAsset.file,
 				});
 			}
-			await mediaMetadataAdapter.set({
-				key: mediaAsset.id,
-				value: metadata,
-			});
+			if (hasDesktopStorage()) {
+				await desktopInvoke({
+					command: "save_media_metadata",
+					args: { projectId, metadata },
+				});
+			} else {
+				await mediaMetadataAdapter.set({
+					key: mediaAsset.id,
+					value: metadata,
+				});
+			}
 		} catch (error) {
 			try {
 				await mediaAssetsAdapter.remove(mediaAsset.id);
@@ -449,10 +490,16 @@ class StorageService {
 		const { mediaMetadataAdapter, mediaAssetsAdapter } =
 			this.getProjectMediaAdapters({ projectId });
 
-		const [storedFile, metadata] = await Promise.all([
-			mediaAssetsAdapter.get(id),
-			mediaMetadataAdapter.get(id),
-		]);
+		const metadata = hasDesktopStorage()
+			? await desktopInvoke<MediaAssetData | null>({
+					command: "load_media_metadata",
+					args: { projectId, mediaId: id },
+				})
+			: await mediaMetadataAdapter.get(id);
+		const storedFile =
+			metadata?.sourcePath || !metadata
+				? null
+				: await mediaAssetsAdapter.get(id);
 
 		if (!metadata) return null;
 		let file = storedFile;
@@ -510,11 +557,16 @@ class StorageService {
 	}: {
 		projectId: string;
 	}): Promise<MediaAsset[]> {
-		const { mediaMetadataAdapter } = this.getProjectMediaAdapters({
-			projectId,
-		});
-
-		const mediaIds = await mediaMetadataAdapter.list();
+		const mediaIds = hasDesktopStorage()
+			? (
+					(await desktopInvoke<MediaAssetData[]>({
+						command: "list_media_metadata",
+						args: { projectId },
+					})) ?? []
+				).map((metadata) => metadata.id)
+			: await this.getProjectMediaAdapters({
+					projectId,
+				}).mediaMetadataAdapter.list();
 		const mediaItems: MediaAsset[] = [];
 
 		for (const id of mediaIds) {
@@ -537,10 +589,15 @@ class StorageService {
 		const { mediaMetadataAdapter, mediaAssetsAdapter } =
 			this.getProjectMediaAdapters({ projectId });
 
-		await Promise.all([
-			mediaAssetsAdapter.remove(id),
-			mediaMetadataAdapter.remove(id),
-		]);
+		await mediaAssetsAdapter.remove(id);
+		if (hasDesktopStorage()) {
+			await desktopInvoke({
+				command: "delete_media_metadata",
+				args: { projectId, mediaId: id },
+			});
+		} else {
+			await mediaMetadataAdapter.remove(id);
+		}
 	}
 
 	async deleteProjectMedia({
@@ -551,10 +608,15 @@ class StorageService {
 		const { mediaMetadataAdapter, mediaAssetsAdapter } =
 			this.getProjectMediaAdapters({ projectId });
 
-		await Promise.all([
-			mediaMetadataAdapter.clear(),
-			mediaAssetsAdapter.clear(),
-		]);
+		await mediaAssetsAdapter.clear();
+		if (hasDesktopStorage()) {
+			await desktopInvoke({
+				command: "clear_media_metadata",
+				args: { projectId },
+			});
+		} else {
+			await mediaMetadataAdapter.clear();
+		}
 	}
 
 	async clearAllData(): Promise<void> {
@@ -567,7 +629,14 @@ class StorageService {
 		isOPFSSupported: boolean;
 		isIndexedDBSupported: boolean;
 	}> {
-		const projectIds = await this.projectsAdapter.list();
+		const projectIds = hasDesktopStorage()
+			? (
+					(await desktopInvoke<SerializedProject[]>({
+						command: "list_project_jsons",
+						args: {},
+					})) ?? []
+				).map((project) => project.metadata.id)
+			: await this.projectsAdapter.list();
 
 		return {
 			projects: projectIds.length,
@@ -579,11 +648,16 @@ class StorageService {
 	async getProjectStorageInfo({ projectId }: { projectId: string }): Promise<{
 		mediaItems: number;
 	}> {
-		const { mediaMetadataAdapter } = this.getProjectMediaAdapters({
-			projectId,
-		});
-
-		const mediaIds = await mediaMetadataAdapter.list();
+		const mediaIds = hasDesktopStorage()
+			? (
+					(await desktopInvoke<MediaAssetData[]>({
+						command: "list_media_metadata",
+						args: { projectId },
+					})) ?? []
+				).map((metadata) => metadata.id)
+			: await this.getProjectMediaAdapters({
+					projectId,
+				}).mediaMetadataAdapter.list();
 
 		return {
 			mediaItems: mediaIds.length,
