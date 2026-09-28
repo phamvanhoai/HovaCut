@@ -4,8 +4,8 @@
 	"version": "0.1.0",
 	"identifier": "vn.hova.hovacut",
 	"build": {
-		"beforeDevCommand": "powershell -ExecutionPolicy Bypass -File ../prepare-frontend.ps1",
-		"beforeBuildCommand": "powershell -ExecutionPolicy Bypass -File ../prepare-frontend.ps1",
+		"beforeDevCommand": "powershell -ExecutionPolicy Bypass -File ./prepare-frontend.ps1",
+		"beforeBuildCommand": "powershell -ExecutionPolicy Bypass -File ./prepare-frontend.ps1",
 		"frontendDist": "../dist"
 	},
 	"app": {
