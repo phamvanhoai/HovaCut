@@ -148,6 +148,41 @@ fn projects_directory() -> Result<PathBuf, String> {
     Ok(directory)
 }
 
+fn application_data_directory() -> Result<PathBuf, String> {
+    let root = env::var("APPDATA").map_err(|_| "Không tìm thấy thư mục AppData.".to_string())?;
+    let directory = PathBuf::from(root).join("HovaCut");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory)
+}
+
+#[tauri::command]
+fn load_saved_sounds_json() -> Result<Option<Value>, String> {
+    let path = application_data_directory()?.join("saved-sounds.json");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let content = fs::read(path).map_err(|error| error.to_string())?;
+    serde_json::from_slice(&content)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_saved_sounds_json(data: Value) -> Result<(), String> {
+    let path = application_data_directory()?.join("saved-sounds.json");
+    let content = serde_json::to_vec_pretty(&data).map_err(|error| error.to_string())?;
+    fs::write(path, content).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_saved_sounds_json() -> Result<(), String> {
+    let path = application_data_directory()?.join("saved-sounds.json");
+    if path.is_file() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn validate_storage_id(value: &str) -> Result<(), String> {
     if value.is_empty()
         || !value.chars().all(|character| {
@@ -1217,6 +1252,9 @@ fn main() {
             list_media_metadata,
             delete_media_metadata,
             clear_media_metadata,
+            load_saved_sounds_json,
+            save_saved_sounds_json,
+            clear_saved_sounds_json,
             import_project_json,
             export_project_json,
             detect_video_encoders,

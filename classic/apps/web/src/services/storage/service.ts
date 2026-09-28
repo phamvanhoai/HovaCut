@@ -666,7 +666,12 @@ class StorageService {
 
 	async loadSavedSounds(): Promise<SavedSoundsData> {
 		try {
-			const savedSoundsData = await this.savedSoundsAdapter.get("user-sounds");
+			const savedSoundsData = hasDesktopStorage()
+				? await desktopInvoke<SavedSoundsData | null>({
+						command: "load_saved_sounds_json",
+						args: {},
+					})
+				: await this.savedSoundsAdapter.get("user-sounds");
 			return (
 				savedSoundsData || {
 					sounds: [],
@@ -708,10 +713,17 @@ class StorageService {
 				lastModified: new Date().toISOString(),
 			};
 
-			await this.savedSoundsAdapter.set({
-				key: "user-sounds",
-				value: updatedData,
-			});
+			if (hasDesktopStorage()) {
+				await desktopInvoke({
+					command: "save_saved_sounds_json",
+					args: { data: updatedData },
+				});
+			} else {
+				await this.savedSoundsAdapter.set({
+					key: "user-sounds",
+					value: updatedData,
+				});
+			}
 		} catch (error) {
 			console.error("Failed to save sound effect:", error);
 			throw error;
@@ -727,10 +739,17 @@ class StorageService {
 				lastModified: new Date().toISOString(),
 			};
 
-			await this.savedSoundsAdapter.set({
-				key: "user-sounds",
-				value: updatedData,
-			});
+			if (hasDesktopStorage()) {
+				await desktopInvoke({
+					command: "save_saved_sounds_json",
+					args: { data: updatedData },
+				});
+			} else {
+				await this.savedSoundsAdapter.set({
+					key: "user-sounds",
+					value: updatedData,
+				});
+			}
 		} catch (error) {
 			console.error("Failed to remove saved sound:", error);
 			throw error;
@@ -749,7 +768,14 @@ class StorageService {
 
 	async clearSavedSounds(): Promise<void> {
 		try {
-			await this.savedSoundsAdapter.remove("user-sounds");
+			if (hasDesktopStorage()) {
+				await desktopInvoke({
+					command: "clear_saved_sounds_json",
+					args: {},
+				});
+			} else {
+				await this.savedSoundsAdapter.remove("user-sounds");
+			}
 		} catch (error) {
 			console.error("Failed to clear saved sounds:", error);
 			throw error;
