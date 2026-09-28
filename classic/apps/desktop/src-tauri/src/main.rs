@@ -3,8 +3,12 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::{
-    env, fs,
+    env,
+    ffi::OsStr,
+    fs,
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -15,6 +19,13 @@ use std::{
 use tauri::Emitter;
 
 static CANCEL_NATIVE_RENDER: AtomicBool = AtomicBool::new(false);
+
+fn background_command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    command
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,7 +58,7 @@ fn inspect_media_file(path: String) -> Result<NativeMediaInfo, String> {
         "mp3" | "wav" | "m4a" | "aac" | "ogg" | "flac" | "opus" => "audio",
         _ => "video",
     };
-    let output = Command::new(ffmpeg_path())
+    let output = background_command(ffmpeg_path())
         .args(["-hide_banner", "-i", &path])
         .output()
         .map_err(|error| error.to_string())?;
@@ -170,7 +181,7 @@ fn extract_video_frames_blocking(
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let pattern = directory.join(format!("frame_%06d.{extension}"));
     let interval = interval_seconds.clamp(0.1, 3600.0);
-    let mut command = Command::new(ffmpeg_path());
+    let mut command = background_command(ffmpeg_path());
     command.args([
         "-hide_banner",
         "-loglevel",
@@ -232,7 +243,7 @@ fn join_video_files_blocking(
     fs::write(&list_path, list).map_err(|error| error.to_string())?;
     let video_encoder = resolve_h264_encoder(&encoder);
     let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p");
-    let mut command = Command::new(ffmpeg_path());
+    let mut command = background_command(ffmpeg_path());
     command
         .args(["-y", "-f", "concat", "-safe", "0", "-i"])
         .arg(&list_path)
@@ -301,7 +312,7 @@ fn render_lofi_video_blocking(
         background_extension.as_str(),
         "png" | "jpg" | "jpeg" | "webp" | "bmp"
     );
-    let mut command = Command::new(ffmpeg_path());
+    let mut command = background_command(ffmpeg_path());
     command.arg("-y");
     if background_is_image {
         command.args(["-loop", "1"]);
@@ -987,7 +998,7 @@ struct NativeFfmpegStatus {
 #[tauri::command]
 fn get_ffmpeg_status() -> NativeFfmpegStatus {
     let path = ffmpeg_path();
-    match Command::new(&path).arg("-version").output() {
+    match background_command(&path).arg("-version").output() {
         Ok(output) if output.status.success() => NativeFfmpegStatus {
             enabled: true,
             available: true,
@@ -1034,7 +1045,7 @@ fn encoder_available(encoder: &str) -> bool {
         .unwrap_or_default()
         .as_nanos();
     let output_path = env::temp_dir().join(format!("hovacut-encoder-{encoder}-{stamp}.mp4"));
-    let available = Command::new(ffmpeg_path())
+    let available = background_command(ffmpeg_path())
         .args([
             "-hide_banner",
             "-loglevel",
@@ -1232,7 +1243,7 @@ fn render_native_timeline(
     {
         return Err("Timeline không có media native hợp lệ.".into());
     }
-    let mut command = Command::new(ffmpeg_path());
+    let mut command = background_command(ffmpeg_path());
     command.arg("-y");
     for clip in &clips {
         if clip.kind == "blank" {
@@ -1511,7 +1522,7 @@ fn render_auto_video_blocking(
     let logo_path = logo_path.filter(|value| Path::new(value).is_file());
     let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p");
     let video_encoder = resolve_h264_encoder(&encoder);
-    let mut command = Command::new(ffmpeg_path());
+    let mut command = background_command(ffmpeg_path());
     command
         .args([
             "-y",
@@ -1646,7 +1657,10 @@ async fn render_auto_video(
 }
 
 fn audio_duration(path: &str) -> f64 {
-    let Ok(output) = Command::new(ffmpeg_path()).args(["-i", path]).output() else {
+    let Ok(output) = background_command(ffmpeg_path())
+        .args(["-i", path])
+        .output()
+    else {
         return 0.0;
     };
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1726,7 +1740,7 @@ fn render_auto_mp3_blocking(
             "320k".into(),
             mp3_path.to_string_lossy().into_owned(),
         ]);
-        let output = Command::new(ffmpeg_path())
+        let output = background_command(ffmpeg_path())
             .args(args)
             .output()
             .map_err(|error| error.to_string())?;
@@ -1783,7 +1797,7 @@ fn render_join_audio_blocking(
         "320k".into(),
         output_path.clone(),
     ]);
-    let output = Command::new(ffmpeg_path())
+    let output = background_command(ffmpeg_path())
         .args(args)
         .output()
         .map_err(|error| error.to_string())?;
@@ -1835,7 +1849,7 @@ fn convert_media_blocking(
         _ => args.extend(["-vn", "-c:a", "libmp3lame", "-b:a", "320k"]),
     }
     args.push(&output_path);
-    let output = Command::new(ffmpeg_path())
+    let output = background_command(ffmpeg_path())
         .args(args)
         .output()
         .map_err(|error| error.to_string())?;
@@ -1860,7 +1874,7 @@ fn render_image_audio_blocking(
         (1920, 1080)
     };
     let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p");
-    let output = Command::new(ffmpeg_path())
+    let output = background_command(ffmpeg_path())
         .args([
             "-y",
             "-loop",
