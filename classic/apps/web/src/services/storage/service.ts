@@ -447,10 +447,21 @@ class StorageService {
 
 		try {
 			if (!mediaAsset.sourcePath) {
-				await mediaAssetsAdapter.set({
-					key: mediaAsset.id,
-					value: mediaAsset.file,
-				});
+				if (hasDesktopStorage()) {
+					await desktopInvoke({
+						command: "save_media_file",
+						args: {
+							projectId,
+							mediaId: mediaAsset.id,
+							data: Array.from(new Uint8Array(await mediaAsset.file.arrayBuffer())),
+						},
+					});
+				} else {
+					await mediaAssetsAdapter.set({
+						key: mediaAsset.id,
+						value: mediaAsset.file,
+					});
+				}
 			}
 			if (hasDesktopStorage()) {
 				await desktopInvoke({
@@ -496,10 +507,24 @@ class StorageService {
 					args: { projectId, mediaId: id },
 				})
 			: await mediaMetadataAdapter.get(id);
-		const storedFile =
-			metadata?.sourcePath || !metadata
-				? null
-				: await mediaAssetsAdapter.get(id);
+		let storedFile: File | null = null;
+		if (metadata && !metadata.sourcePath) {
+			if (hasDesktopStorage()) {
+				const data = await desktopInvoke<number[] | null>({
+					command: "load_media_file",
+					args: { projectId, mediaId: id },
+				});
+				if (data) {
+					storedFile = new File([new Uint8Array(data)], metadata.name, {
+						type:
+							metadata.mimeType || getMimeTypeFromName({ name: metadata.name }),
+						lastModified: metadata.lastModified,
+					});
+				}
+			} else {
+				storedFile = await mediaAssetsAdapter.get(id);
+			}
+		}
 
 		if (!metadata) return null;
 		let file = storedFile;
@@ -589,14 +614,22 @@ class StorageService {
 		const { mediaMetadataAdapter, mediaAssetsAdapter } =
 			this.getProjectMediaAdapters({ projectId });
 
-		await mediaAssetsAdapter.remove(id);
 		if (hasDesktopStorage()) {
-			await desktopInvoke({
-				command: "delete_media_metadata",
-				args: { projectId, mediaId: id },
-			});
+			await Promise.all([
+				desktopInvoke({
+					command: "delete_media_file",
+					args: { projectId, mediaId: id },
+				}),
+				desktopInvoke({
+					command: "delete_media_metadata",
+					args: { projectId, mediaId: id },
+				}),
+			]);
 		} else {
-			await mediaMetadataAdapter.remove(id);
+			await Promise.all([
+				mediaAssetsAdapter.remove(id),
+				mediaMetadataAdapter.remove(id),
+			]);
 		}
 	}
 
@@ -608,14 +641,22 @@ class StorageService {
 		const { mediaMetadataAdapter, mediaAssetsAdapter } =
 			this.getProjectMediaAdapters({ projectId });
 
-		await mediaAssetsAdapter.clear();
 		if (hasDesktopStorage()) {
-			await desktopInvoke({
-				command: "clear_media_metadata",
-				args: { projectId },
-			});
+			await Promise.all([
+				desktopInvoke({
+					command: "clear_project_media_files",
+					args: { projectId },
+				}),
+				desktopInvoke({
+					command: "clear_media_metadata",
+					args: { projectId },
+				}),
+			]);
 		} else {
-			await mediaMetadataAdapter.clear();
+			await Promise.all([
+				mediaAssetsAdapter.clear(),
+				mediaMetadataAdapter.clear(),
+			]);
 		}
 	}
 

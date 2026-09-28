@@ -100,6 +100,47 @@ fn media_metadata_path(project_id: &str) -> Result<PathBuf, String> {
     Ok(projects_directory()?.join(format!("{project_id}.media.json")))
 }
 
+fn media_file_path(project_id: &str, media_id: &str) -> Result<PathBuf, String> {
+    validate_storage_id(project_id)?;
+    validate_storage_id(media_id)?;
+    let directory = application_data_directory()?.join("media").join(project_id);
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory.join(format!("{media_id}.bin")))
+}
+
+#[tauri::command]
+fn save_media_file(project_id: String, media_id: String, data: Vec<u8>) -> Result<(), String> {
+    fs::write(media_file_path(&project_id, &media_id)?, data).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn load_media_file(project_id: String, media_id: String) -> Result<Option<Vec<u8>>, String> {
+    let path = media_file_path(&project_id, &media_id)?;
+    if !path.is_file() {
+        return Ok(None);
+    }
+    fs::read(path).map(Some).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn delete_media_file(project_id: String, media_id: String) -> Result<(), String> {
+    let path = media_file_path(&project_id, &media_id)?;
+    if path.is_file() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_project_media_files(project_id: String) -> Result<(), String> {
+    validate_storage_id(&project_id)?;
+    let directory = application_data_directory()?.join("media").join(project_id);
+    if directory.is_dir() {
+        fs::remove_dir_all(directory).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn read_media_metadata(project_id: &str) -> Result<Vec<Value>, String> {
     let path = media_metadata_path(project_id)?;
     if !path.is_file() {
@@ -231,6 +272,7 @@ fn delete_project_json(project_id: String) -> Result<(), String> {
     if media_path.is_file() {
         fs::remove_file(media_path).map_err(|error| error.to_string())?;
     }
+    clear_project_media_files(project_id)?;
     Ok(())
 }
 
@@ -1191,6 +1233,10 @@ fn main() {
             list_media_metadata,
             delete_media_metadata,
             clear_media_metadata,
+            save_media_file,
+            load_media_file,
+            delete_media_file,
+            clear_project_media_files,
             load_saved_sounds_json,
             save_saved_sounds_json,
             clear_saved_sounds_json,
