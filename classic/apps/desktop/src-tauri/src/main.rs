@@ -604,26 +604,47 @@ fn shuffled(mut paths: Vec<String>) -> Vec<String> {
 }
 
 fn encoder_available(encoder: &str) -> bool {
-    Command::new(ffmpeg_path())
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let output_path = env::temp_dir().join(format!("hovacut-encoder-{encoder}-{stamp}.mp4"));
+    let available = Command::new(ffmpeg_path())
         .args([
             "-hide_banner",
             "-loglevel",
             "error",
+            "-y",
             "-f",
             "lavfi",
             "-i",
-            "color=s=256x256:d=0.1",
+            "color=s=256x256:r=30:d=0.25",
             "-frames:v",
-            "1",
+            "4",
             "-c:v",
             encoder,
-            "-f",
-            "null",
-            "-",
         ])
+        .arg(&output_path)
         .status()
         .map(|status| status.success())
-        .unwrap_or(false)
+        .unwrap_or(false);
+    let valid_output = fs::metadata(&output_path)
+        .map(|metadata| metadata.len() > 0)
+        .unwrap_or(false);
+    let _ = fs::remove_file(output_path);
+    available && valid_output
+}
+
+fn resolve_h264_encoder(requested: &str) -> &'static str {
+    let hardware = match requested {
+        "nvidia" => Some("h264_nvenc"),
+        "intel" => Some("h264_qsv"),
+        "amd" => Some("h264_amf"),
+        _ => None,
+    };
+    hardware
+        .filter(|encoder| encoder_available(encoder))
+        .unwrap_or("libx264")
 }
 
 #[tauri::command]
@@ -928,12 +949,7 @@ fn render_native_timeline(
     let video_encoder = if format == "webm" {
         "libvpx-vp9"
     } else {
-        match encoder.as_str() {
-            "nvidia" => "h264_nvenc",
-            "intel" => "h264_qsv",
-            "amd" => "h264_amf",
-            _ => "libx264",
-        }
+        resolve_h264_encoder(&encoder)
     };
     command.args([
         "-filter_complex",
@@ -1065,12 +1081,7 @@ fn render_auto_video(
         .join("\n");
     fs::write(&list_path, list).map_err(|error| error.to_string())?;
     let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p");
-    let video_encoder = match encoder.as_str() {
-        "nvidia" => "h264_nvenc",
-        "amd" => "h264_amf",
-        "intel" => "h264_qsv",
-        _ => "libx264",
-    };
+    let video_encoder = resolve_h264_encoder(&encoder);
     let (speed_option, speed_value) = if video_encoder == "h264_amf" {
         ("-quality", "speed")
     } else {

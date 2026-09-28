@@ -203,7 +203,7 @@ function ProjectsHeader() {
 						<BreadcrumbList>
 							<BreadcrumbItem>
 								<BreadcrumbLink asChild>
-									<a href={desktopPath("/", "/automation/index.html")} className="text-sm sm:text-base">
+									<a href={desktopPath("/projects", "/projects/index.html")} className="text-sm sm:text-base">
 										Home
 									</a>
 								</BreadcrumbLink>
