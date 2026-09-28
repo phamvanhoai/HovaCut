@@ -204,9 +204,12 @@ function PreviewCanvas({
 		renderingRef.current = true;
 		lastSceneRef.current = renderTree;
 		lastFrameRef.current = frame;
-		renderer
+		void renderer
 			.render({ node: renderTree, time: renderTime })
-			.then(() => {
+			.catch((error) => {
+				console.error("Preview frame render failed:", error);
+			})
+			.finally(() => {
 				renderingRef.current = false;
 			});
 	}, [renderer, renderTree, editor.playback, editor.timeline]);

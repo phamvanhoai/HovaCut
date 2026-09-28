@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     env, fs,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
@@ -95,6 +95,36 @@ fn inspect_media_file(path: String) -> Result<NativeMediaInfo, String> {
             .lines()
             .any(|line| line.contains("Stream") && line.contains("Audio:")),
     })
+}
+
+#[tauri::command]
+fn read_media_range(path: String, start: u64, end: u64) -> Result<Vec<u8>, String> {
+    if end < start {
+        return Err("Khoảng đọc media không hợp lệ.".into());
+    }
+    // Keep IPC payloads bounded even if a malformed caller requests the whole file.
+    const MAX_CHUNK_SIZE: u64 = 16 * 1024 * 1024;
+    if end - start > MAX_CHUNK_SIZE {
+        return Err("Đoạn media yêu cầu vượt quá 16 MB.".into());
+    }
+    let source = PathBuf::from(path);
+    if !source.is_file() {
+        return Err("File media không tồn tại.".into());
+    }
+    let size = fs::metadata(&source)
+        .map_err(|error| error.to_string())?
+        .len();
+    if start >= size {
+        return Ok(Vec::new());
+    }
+    let read_end = end.min(size);
+    let mut file = fs::File::open(source).map_err(|error| error.to_string())?;
+    file.seek(SeekFrom::Start(start))
+        .map_err(|error| error.to_string())?;
+    let mut data = vec![0; (read_end - start) as usize];
+    file.read_exact(&mut data)
+        .map_err(|error| error.to_string())?;
+    Ok(data)
 }
 
 #[tauri::command]
@@ -2015,6 +2045,7 @@ fn main() {
             search_sounds,
             save_freesound_api_key,
             inspect_media_file,
+            read_media_range,
             save_export_file,
             extract_video_frames,
             join_video_files,

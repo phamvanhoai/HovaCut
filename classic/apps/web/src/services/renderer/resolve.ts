@@ -206,6 +206,8 @@ async function resolveVideoNode({
 		mediaId: node.params.mediaId,
 		file: node.params.file,
 		url: node.params.url,
+		sourcePath: node.params.sourcePath,
+		fileSize: node.params.fileSize,
 		time: mediaTimeToSeconds({
 			time: roundMediaTime({ time: sourceTimeTicks }),
 		}),
@@ -430,6 +432,8 @@ async function resolveBackdropSource({
 			mediaId: node.params.mediaId,
 			file: node.params.file,
 			url: node.params.url,
+			sourcePath: node.params.sourcePath,
+			fileSize: node.params.fileSize,
 			time: mediaTimeToSeconds({
 				time: roundMediaTime({ time: sourceTimeTicks }),
 			}),

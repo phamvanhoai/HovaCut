@@ -7,6 +7,8 @@ import {
 export interface VideoNodeParams extends VisualNodeParams {
 	url: string;
 	file: File;
+	sourcePath?: string;
+	fileSize?: number;
 	mediaId: string;
 }
 

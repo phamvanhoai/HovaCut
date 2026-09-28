@@ -3,9 +3,50 @@ import {
 	ALL_FORMATS,
 	BlobSource,
 	UrlSource,
+	Source,
 	CanvasSink,
 	type WrappedCanvas,
 } from "mediabunny";
+
+type ReadResult = { bytes: Uint8Array; view: DataView; offset: number };
+
+type DesktopWindow = Window & {
+	__TAURI__?: {
+		core: { invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> };
+	};
+};
+
+class DesktopFileSource extends Source {
+	constructor(
+		private readonly path: string,
+		private readonly size: number,
+	) {
+		super();
+	}
+
+	_retrieveSize(): number {
+		return this.size;
+	}
+
+	async _read(start: number, end: number): Promise<ReadResult> {
+		const invoke = (window as DesktopWindow).__TAURI__?.core.invoke;
+		if (!invoke) throw new Error("Tauri media bridge is unavailable");
+		const data = await invoke<number[]>("read_media_range", {
+			path: this.path,
+			start,
+			end,
+		});
+		const bytes = new Uint8Array(data);
+		this.onread?.(start, start + bytes.byteLength);
+		return {
+			bytes,
+			view: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+			offset: start,
+		};
+	}
+
+	_dispose() {}
+}
 
 interface VideoSinkData {
 	input: Input;
@@ -28,14 +69,18 @@ export class VideoCache {
 		mediaId,
 		file,
 		url,
+		sourcePath,
+		fileSize,
 		time,
 	}: {
 		mediaId: string;
 		file: File;
 		url?: string;
+		sourcePath?: string;
+		fileSize?: number;
 		time: number;
 	}): Promise<WrappedCanvas | null> {
-		await this.ensureSink({ mediaId, file, url });
+		await this.ensureSink({ mediaId, file, url, sourcePath, fileSize });
 
 		const sinkData = this.sinks.get(mediaId);
 		if (!sinkData) return null;
@@ -239,10 +284,14 @@ export class VideoCache {
 		mediaId,
 		file,
 		url,
+		sourcePath,
+		fileSize,
 	}: {
 		mediaId: string;
 		file: File;
 		url?: string;
+		sourcePath?: string;
+		fileSize?: number;
 	}): Promise<void> {
 		if (this.sinks.has(mediaId)) return;
 
@@ -251,7 +300,7 @@ export class VideoCache {
 			return;
 		}
 
-		const initPromise = this.initializeSink({ mediaId, file, url });
+		const initPromise = this.initializeSink({ mediaId, file, url, sourcePath, fileSize });
 		this.initPromises.set(mediaId, initPromise);
 
 		try {
@@ -264,14 +313,21 @@ export class VideoCache {
 		mediaId,
 		file,
 		url,
+		sourcePath,
+		fileSize,
 	}: {
 		mediaId: string;
 		file: File;
 		url?: string;
+		sourcePath?: string;
+		fileSize?: number;
 	}): Promise<void> {
+		const desktopSource = sourcePath && fileSize
+			? new DesktopFileSource(sourcePath, fileSize)
+			: null;
 		const input = new Input({
-			source:
-				file.size === 0 && url ? new UrlSource(url) : new BlobSource(file),
+			source: desktopSource ??
+				(file.size === 0 && url ? new UrlSource(url) : new BlobSource(file)),
 			formats: ALL_FORMATS,
 		});
 
