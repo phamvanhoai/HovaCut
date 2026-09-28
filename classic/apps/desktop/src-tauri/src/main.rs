@@ -1,3 +1,4 @@
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -12,6 +13,101 @@ use std::{
 use tauri::Emitter;
 
 static CANCEL_NATIVE_RENDER: AtomicBool = AtomicBool::new(false);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeMediaInfo {
+    name: String,
+    media_type: String,
+    size: u64,
+    last_modified: u64,
+    duration: Option<f64>,
+    width: Option<u32>,
+    height: Option<u32>,
+    fps: Option<f64>,
+    has_audio: bool,
+}
+
+#[tauri::command]
+fn inspect_media_file(path: String) -> Result<NativeMediaInfo, String> {
+    let source = PathBuf::from(&path);
+    if !source.is_file() {
+        return Err("File media không tồn tại.".into());
+    }
+    let metadata = fs::metadata(&source).map_err(|error| error.to_string())?;
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let media_type = match extension.as_str() {
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "svg" => "image",
+        "mp3" | "wav" | "m4a" | "aac" | "ogg" | "flac" | "opus" => "audio",
+        _ => "video",
+    };
+    let output = Command::new(ffmpeg_path())
+        .args(["-hide_banner", "-i", &path])
+        .output()
+        .map_err(|error| error.to_string())?;
+    let details = String::from_utf8_lossy(&output.stderr);
+    let duration = Regex::new(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
+        .ok()
+        .and_then(|pattern| pattern.captures(&details))
+        .and_then(|capture| {
+            let hours = capture.get(1)?.as_str().parse::<f64>().ok()?;
+            let minutes = capture.get(2)?.as_str().parse::<f64>().ok()?;
+            let seconds = capture.get(3)?.as_str().parse::<f64>().ok()?;
+            Some(hours * 3600.0 + minutes * 60.0 + seconds)
+        });
+    let dimensions = Regex::new(r"(?m)Stream[^\r\n]*Video:[^\r\n]*?\b(\d{2,5})x(\d{2,5})\b")
+        .ok()
+        .and_then(|pattern| pattern.captures(&details))
+        .and_then(|capture| {
+            Some((
+                capture.get(1)?.as_str().parse::<u32>().ok()?,
+                capture.get(2)?.as_str().parse::<u32>().ok()?,
+            ))
+        });
+    let fps = Regex::new(r"(?:,|\s)(\d+(?:\.\d+)?)\s+fps(?:,|\s)")
+        .ok()
+        .and_then(|pattern| pattern.captures(&details))
+        .and_then(|capture| capture.get(1)?.as_str().parse::<f64>().ok());
+    let last_modified = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_millis() as u64)
+        .unwrap_or_default();
+    Ok(NativeMediaInfo {
+        name: source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("media")
+            .to_owned(),
+        media_type: media_type.to_owned(),
+        size: metadata.len(),
+        last_modified,
+        duration,
+        width: dimensions.map(|value| value.0),
+        height: dimensions.map(|value| value.1),
+        fps,
+        has_audio: details
+            .lines()
+            .any(|line| line.contains("Stream") && line.contains("Audio:")),
+    })
+}
+
+#[tauri::command]
+fn save_export_file(output_path: String, data: Vec<u8>) -> Result<String, String> {
+    let output = PathBuf::from(&output_path);
+    if let Some(parent) = output.parent() {
+        if !parent.is_dir() {
+            return Err("Thư mục xuất không tồn tại.".into());
+        }
+    }
+    fs::write(&output, data).map_err(|error| error.to_string())?;
+    Ok(output_path)
+}
 
 fn freesound_api_key() -> Result<String, String> {
     let path = application_data_directory()?.join("settings.json");
@@ -1430,7 +1526,9 @@ fn main() {
             convert_media,
             render_image_audio,
             search_sounds,
-            save_freesound_api_key
+            save_freesound_api_key,
+            inspect_media_file,
+            save_export_file
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động HovaCut Desktop");

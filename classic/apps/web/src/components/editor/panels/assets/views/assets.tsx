@@ -167,25 +167,59 @@ export function MediaView() {
 		});
 		const paths = typeof selected === "string" ? [selected] : selected;
 		if (!paths?.length) return;
+		setIsProcessing(true);
+		setProgress(0);
 		try {
-			const files = await Promise.all(
-				paths.map(async (path) => {
-					const response = await fetch(
-						window.__TAURI__!.core.convertFileSrc(path),
-					);
-					if (!response.ok) throw new Error(`Không thể đọc ${path}`);
-					const blob = await response.blob();
-					const name = path.split(/[\\/]/).pop() ?? "media";
-					return new File([blob], name, {
-						type: getMimeTypeFromName({ name }),
-					});
-				}),
-			);
-			await processFiles({ files, sourcePaths: paths });
+			await showMediaUploadToast({
+				filesCount: paths.length,
+				promise: async () => {
+					const assetNames: string[] = [];
+					for (const [index, path] of paths.entries()) {
+						const info = await window.__TAURI__!.core.invoke<{
+							name: string;
+							mediaType: "image" | "video" | "audio";
+							size: number;
+							lastModified: number;
+							duration?: number;
+							width?: number;
+							height?: number;
+							fps?: number;
+							hasAudio: boolean;
+						}>("inspect_media_file", { path });
+						const file = new File([], info.name, {
+							type: getMimeTypeFromName({ name: info.name }),
+							lastModified: info.lastModified,
+						});
+						await editor.media.addMediaAsset({
+							projectId: activeProject.metadata.id,
+							asset: {
+								name: info.name,
+								type: info.mediaType,
+								file,
+								sourcePath: path,
+								url: window.__TAURI__!.core.convertFileSrc(path),
+								nativeFileSize: info.size,
+								nativeLastModified: info.lastModified,
+								duration: info.duration,
+								width: info.width,
+								height: info.height,
+								fps: info.fps,
+								hasAudio: info.hasAudio,
+							},
+						});
+						assetNames.push(info.name);
+						setProgress(Math.round(((index + 1) / paths.length) * 100));
+					}
+					return { uploadedCount: assetNames.length, assetNames };
+				},
+			});
 		} catch (error) {
 			toast.error("Không thể nhập media", {
 				description: error instanceof Error ? error.message : "Có lỗi xảy ra",
 			});
+		} finally {
+			setIsProcessing(false);
+			setProgress(0);
 		}
 	};
 
@@ -236,8 +270,8 @@ export function MediaView() {
 					valueB = b.duration || 0;
 					break;
 				case "size":
-					valueA = a.file.size;
-					valueB = b.file.size;
+					valueA = a.nativeFileSize ?? a.file.size;
+					valueB = b.nativeFileSize ?? b.file.size;
 					break;
 				default:
 					return 0;
@@ -408,24 +442,40 @@ function MediaItemWithContextMenu({
 		});
 		if (typeof selected !== "string") return;
 		try {
-			const name = selected.split(/[\\/]/).pop() ?? item.name;
-			const response = await fetch(
-				window.__TAURI__.core.convertFileSrc(selected),
-			);
-			if (!response.ok) throw new Error("Không đọc được file thay thế.");
-			const blob = await response.blob();
-			const file = new File([blob], name, {
-				type: getMimeTypeFromName({ name }),
+			const info = await window.__TAURI__.core.invoke<{
+				name: string;
+				mediaType: "image" | "video" | "audio";
+				size: number;
+				lastModified: number;
+				duration?: number;
+				width?: number;
+				height?: number;
+				fps?: number;
+				hasAudio: boolean;
+			}>("inspect_media_file", { path: selected });
+			if (info.mediaType !== item.type)
+				throw new Error("File thay thế phải cùng loại media.");
+			const file = new File([], info.name, {
+				type: getMimeTypeFromName({ name: info.name }),
+				lastModified: info.lastModified,
 			});
-			const [processed] = await processMediaAssets({
-				files: [file],
-				sourcePaths: [selected],
-			});
-			if (!processed) throw new Error("Không thể xử lý file thay thế.");
 			await editor.media.relinkMediaAsset({
 				projectId: activeProject.metadata.id,
 				id: item.id,
-				asset: processed,
+				asset: {
+					name: info.name,
+					type: info.mediaType,
+					file,
+					sourcePath: selected,
+					url: window.__TAURI__.core.convertFileSrc(selected),
+					nativeFileSize: info.size,
+					nativeLastModified: info.lastModified,
+					duration: info.duration,
+					width: info.width,
+					height: info.height,
+					fps: info.fps,
+					hasAudio: info.hasAudio,
+				},
 			});
 			toast.success("Đã liên kết lại media", { description: selected });
 		} catch (error) {

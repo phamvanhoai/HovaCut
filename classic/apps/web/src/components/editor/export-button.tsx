@@ -150,6 +150,54 @@ function ExportPopover({
 		return () => unlisten?.();
 	}, []);
 
+	async function handleCompatibleExport() {
+		if (!activeProject) return;
+		const result = await editor.project.export({
+			options: {
+				format,
+				quality,
+				fps: activeProject.settings.fps,
+				includeAudio: shouldIncludeAudio,
+			},
+		});
+		if (result.cancelled) {
+			editor.project.clearExportState();
+			return;
+		}
+		if (result.success && result.buffer) {
+			if (window.__TAURI__) {
+				const outputPath = await window.__TAURI__.dialog.save({
+					defaultPath: `${activeProject.metadata.name}.${format}`,
+					filters: [{
+						name: format === "webm" ? "WebM Video" : "MP4 Video",
+						extensions: [format],
+					}],
+				});
+				if (!outputPath) return;
+				await window.__TAURI__.core.invoke("save_export_file", {
+					outputPath,
+					data: Array.from(new Uint8Array(result.buffer)),
+				});
+				toast.success("Đã lưu video", { description: outputPath });
+			} else {
+				downloadBuffer({
+					buffer: result.buffer,
+					filename: `${activeProject.metadata.name}${getExportFileExtension({ format })}`,
+					mimeType: getExportMimeType({ format }),
+				});
+			}
+			editor.project.clearExportState();
+			onOpenChange(false);
+		}
+	}
+
+	const useCompatibleRenderer = async (reason: string) => {
+		toast.info("Timeline cần renderer tương thích", {
+			description: `${reason} HovaCut sẽ xuất đầy đủ bằng renderer của OpenCut.`,
+		});
+		await handleCompatibleExport();
+	};
+
 	const handleNativeExport = async () => {
 		if (!window.__TAURI__) return;
 		const scene = editor.scenes.getActiveScene();
@@ -195,8 +243,8 @@ function ExportPopover({
 			);
 		});
 		if (hasUnsupportedOverlay) {
-			toast.error(
-				"Overlay có rotation, animation, mask hoặc effect chưa hỗ trợ Native GPU.",
+			await useCompatibleRenderer(
+				"Overlay có sticker, graphic, rotation, animation, mask, blend mode hoặc hiệu ứng nâng cao.",
 			);
 			return;
 		}
@@ -246,7 +294,7 @@ function ExportPopover({
 			(element) => element.type === "video" || element.type === "image",
 		).length;
 		if (overlays.length !== mediaOverlayCount) {
-			toast.error("Một số overlay không còn file gốc hoặc thiếu kích thước.");
+			await useCompatibleRenderer("Một số overlay cần xử lý bằng OpenCut.");
 			return;
 		}
 		if (
@@ -254,7 +302,7 @@ function ExportPopover({
 				hasUnsupportedEffects(element),
 			)
 		) {
-			toast.error("Main timeline có effect chưa hỗ trợ Native GPU.");
+			await useCompatibleRenderer("Main timeline có hiệu ứng nâng cao.");
 			return;
 		}
 		const texts = overlayElements.flatMap((element) => {
@@ -345,7 +393,16 @@ function ExportPopover({
 			sourceClips.length !== scene.tracks.main.elements.length ||
 			sourceClips.length === 0
 		) {
-			toast.error("Timeline phải chỉ gồm video/ảnh được nhập từ ổ đĩa.");
+			await useCompatibleRenderer("Timeline không phù hợp với FFmpeg native.");
+			return;
+		}
+		if (
+			shouldIncludeAudio &&
+			scene.tracks.audio.some((track) =>
+				track.elements.some((element) => element.sourceType !== "upload"),
+			)
+		) {
+			await useCompatibleRenderer("Timeline có âm thanh từ thư viện trực tuyến.");
 			return;
 		}
 		const audios = shouldIncludeAudio
@@ -447,32 +504,7 @@ function ExportPopover({
 	};
 
 	const handleExport = async () => {
-		if (!activeProject) return;
-
-		const result = await editor.project.export({
-			options: {
-				format,
-				quality,
-				fps: activeProject.settings.fps,
-				includeAudio: shouldIncludeAudio,
-			},
-		});
-
-		if (result.cancelled) {
-			editor.project.clearExportState();
-			return;
-		}
-
-		if (result.success && result.buffer) {
-			downloadBuffer({
-				buffer: result.buffer,
-				filename: `${activeProject.metadata.name}${getExportFileExtension({ format })}`,
-				mimeType: getExportMimeType({ format }),
-			});
-
-			editor.project.clearExportState();
-			onOpenChange(false);
-		}
+		await handleCompatibleExport();
 	};
 
 	const handleCancel = () => {

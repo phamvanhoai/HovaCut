@@ -114,6 +114,7 @@ const VIEW_MODE_OPTIONS = [
 ];
 
 export default function ProjectsPage() {
+	const [isDesktop, setIsDesktop] = useState(false);
 	const { searchQuery, sortKey, sortOrder, viewMode } = useProjectsStore();
 	const editor = useEditor();
 	const sortOption: TProjectSortOption = `${sortKey}-${sortOrder}`;
@@ -125,6 +126,10 @@ export default function ProjectsPage() {
 	);
 
 	useEffect(() => {
+		setIsDesktop(Boolean(window.__TAURI__));
+	}, []);
+
+	useEffect(() => {
 		if (!editor.project.getIsInitialized()) {
 			editor.project.loadAllProjects();
 		}
@@ -133,7 +138,7 @@ export default function ProjectsPage() {
 	return (
 		<div className="bg-background min-h-screen">
 			<MigrationDialog />
-			<StoragePersistenceDialog />
+			{!isDesktop ? <StoragePersistenceDialog /> : null}
 			<ChangelogNotification />
 			<ProjectsHeader />
 			<ProjectsToolbar projectIds={projectsToDisplay.map((p) => p.id)} />
