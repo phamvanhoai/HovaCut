@@ -350,6 +350,65 @@ fn render_lofi_video(
     Ok(output_path)
 }
 
+#[tauri::command]
+fn create_file_list(
+    directory: String,
+    output_path: String,
+    include_extension: bool,
+    shuffle: bool,
+) -> Result<usize, String> {
+    let root = PathBuf::from(directory);
+    if !root.is_dir() {
+        return Err("Thư mục nguồn không tồn tại.".into());
+    }
+    let mut values = fs::read_dir(root)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .filter_map(|path| {
+            if include_extension {
+                path.file_name()?.to_str().map(str::to_owned)
+            } else {
+                path.file_stem()?.to_str().map(str::to_owned)
+            }
+        })
+        .collect::<Vec<_>>();
+    values.sort_by_key(|value| value.to_ascii_lowercase());
+    if shuffle {
+        values = shuffled(values);
+    }
+    let content = if values.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", values.join("\n"))
+    };
+    fs::write(output_path, content.as_bytes()).map_err(|error| error.to_string())?;
+    Ok(values.len())
+}
+
+#[tauri::command]
+fn shuffle_text_file(input_path: String, output_path: String) -> Result<usize, String> {
+    if !Path::new(&input_path).is_file() {
+        return Err("File TXT nguồn không tồn tại.".into());
+    }
+    let content = fs::read_to_string(input_path).map_err(|error| error.to_string())?;
+    let values = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let values = shuffled(values);
+    let result = if values.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", values.join("\n"))
+    };
+    fs::write(output_path, result.as_bytes()).map_err(|error| error.to_string())?;
+    Ok(values.len())
+}
+
 fn freesound_api_key() -> Result<String, String> {
     let path = application_data_directory()?.join("settings.json");
     if path.is_file() {
@@ -1778,7 +1837,9 @@ fn main() {
             save_export_file,
             extract_video_frames,
             join_video_files,
-            render_lofi_video
+            render_lofi_video,
+            create_file_list,
+            shuffle_text_file
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động HovaCut Desktop");

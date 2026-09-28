@@ -18,6 +18,7 @@ import {
 	Clapperboard,
 	Download,
 	FileCog,
+	FileText,
 	ImageIcon,
 	Images,
 	ListMusic,
@@ -54,7 +55,8 @@ type ToolId =
 	| "join-audio"
 	| "video-frames"
 	| "join-video"
-	| "lofi-video";
+	| "lofi-video"
+	| "text-list";
 type TauriApi = {
 	core: {
 		invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -129,6 +131,12 @@ const TOOLS = [
 		description: "Effect và logo",
 		icon: WandSparkles,
 	},
+	{
+		id: "text-list" as const,
+		label: "TXT / File List",
+		description: "Tạo và xáo danh sách",
+		icon: FileText,
+	},
 ];
 
 export default function AutomationPage() {
@@ -169,6 +177,8 @@ export default function AutomationPage() {
 	const [desktopLofiAudio, setDesktopLofiAudio] = useState("");
 	const [desktopLofiEffect, setDesktopLofiEffect] = useState("");
 	const [desktopLofiLogo, setDesktopLofiLogo] = useState("");
+	const [desktopListFolder, setDesktopListFolder] = useState("");
+	const [desktopTextFile, setDesktopTextFile] = useState("");
 	const [desktopVideoEncoders, setDesktopVideoEncoders] = useState<string[]>(
 		[],
 	);
@@ -733,6 +743,86 @@ export default function AutomationPage() {
 			]);
 		} catch (reason) {
 			setError(typeof reason === "string" ? reason : "Render Lofi thất bại.");
+		} finally {
+			setActiveJob(null);
+		}
+	};
+	const chooseListFolder = async () => {
+		const path = await window.__TAURI__?.dialog.open({
+			multiple: false,
+			directory: true,
+		});
+		if (typeof path === "string") setDesktopListFolder(path);
+	};
+	const chooseTextFile = async () => {
+		const path = await window.__TAURI__?.dialog.open({
+			multiple: false,
+			directory: false,
+			filters: [{ name: "Text", extensions: ["txt"] }],
+		});
+		if (typeof path === "string") setDesktopTextFile(path);
+	};
+	const handleCreateFileList = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (!window.__TAURI__ || !desktopListFolder) return;
+		const data = new FormData(event.currentTarget);
+		const outputPath = await window.__TAURI__.dialog.save({
+			defaultPath: "file-list.txt",
+			filters: [{ name: "Text", extensions: ["txt"] }],
+		});
+		if (!outputPath) return;
+		setError(null);
+		setActiveJob("text-list");
+		try {
+			const count = await window.__TAURI__.core.invoke<number>(
+				"create_file_list",
+				{
+					directory: desktopListFolder,
+					outputPath,
+					includeExtension: data.get("include-extension") === "true",
+					shuffle: data.get("shuffle") === "true",
+				},
+			);
+			setJobs((current) => [
+				{
+					id: crypto.randomUUID(),
+					filename: `${count} dòng · ${outputPath.split(/[\\/]/).pop() ?? outputPath}`,
+					url: "",
+					createdAt: new Date(),
+				},
+				...current,
+			]);
+		} catch (reason) {
+			setError(typeof reason === "string" ? reason : "Tạo file list thất bại.");
+		} finally {
+			setActiveJob(null);
+		}
+	};
+	const handleShuffleText = async () => {
+		if (!window.__TAURI__ || !desktopTextFile) return;
+		const outputPath = await window.__TAURI__.dialog.save({
+			defaultPath: "shuffled-list.txt",
+			filters: [{ name: "Text", extensions: ["txt"] }],
+		});
+		if (!outputPath) return;
+		setError(null);
+		setActiveJob("text-list");
+		try {
+			const count = await window.__TAURI__.core.invoke<number>(
+				"shuffle_text_file",
+				{ inputPath: desktopTextFile, outputPath },
+			);
+			setJobs((current) => [
+				{
+					id: crypto.randomUUID(),
+					filename: `${count} dòng · ${outputPath.split(/[\\/]/).pop() ?? outputPath}`,
+					url: "",
+					createdAt: new Date(),
+				},
+				...current,
+			]);
+		} catch (reason) {
+			setError(typeof reason === "string" ? reason : "Xáo TXT thất bại.");
 		} finally {
 			setActiveJob(null);
 		}
@@ -1802,6 +1892,60 @@ export default function AutomationPage() {
 									icon={<WandSparkles />}
 								/>
 							</form>
+						</ToolCard>
+					)}
+					{selectedTool === "text-list" && (
+						<ToolCard
+							title="TXT / File List"
+							description="Lấy tên toàn bộ file trong thư mục hoặc xáo trộn các dòng TXT, tương tự nhóm GET/ShuffleText của CGT."
+							icon={<FileText />}
+						>
+							<div className="space-y-6">
+								<form className="space-y-4 rounded-md border p-4" onSubmit={handleCreateFileList}>
+									<h3 className="font-medium">Tạo danh sách từ thư mục</h3>
+									<DesktopPathField
+										label="Thư mục nguồn"
+										value={desktopListFolder}
+										action="Chọn thư mục"
+										onChoose={() => void chooseListFolder()}
+										icon={<FileText />}
+									/>
+									<div className="flex flex-wrap gap-4">
+										<label className="flex items-center gap-2 text-sm">
+											<input type="checkbox" name="include-extension" value="true" defaultChecked />
+											Giữ đuôi file
+										</label>
+										<label className="flex items-center gap-2 text-sm">
+											<input type="checkbox" name="shuffle" value="true" />
+											Xáo trộn kết quả
+										</label>
+									</div>
+									<SubmitButton
+										busy={activeJob === "text-list"}
+										disabled={activeJob !== null || !desktopListFolder}
+										label="Xuất File List"
+										icon={<FileText />}
+									/>
+								</form>
+								<div className="space-y-4 rounded-md border p-4">
+									<h3 className="font-medium">Xáo trộn TXT</h3>
+									<DesktopPathField
+										label="File TXT nguồn"
+										value={desktopTextFile}
+										action="Chọn TXT"
+										onChoose={() => void chooseTextFile()}
+										icon={<Shuffle />}
+									/>
+									<Button
+										type="button"
+										className="w-full"
+										disabled={activeJob !== null || !desktopTextFile}
+										onClick={() => void handleShuffleText()}
+									>
+										<Shuffle /> Xáo và lưu TXT mới
+									</Button>
+								</div>
+							</div>
 						</ToolCard>
 					)}
 				</section>
