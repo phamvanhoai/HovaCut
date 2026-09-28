@@ -10,3 +10,4 @@ docs/
 .moon/cache/
 .next/
 classic/apps/desktop-ui/out/
+classic/apps/desktop/src-tauri/resources/ffmpeg.exe

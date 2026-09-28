@@ -1,0 +1,22 @@
+FFmpeg bundled with HovaCut
+===========================
+
+This distribution includes FFmpeg 4.4 full build from gyan.dev.
+FFmpeg is Copyright (c) 2000-2021 the FFmpeg developers.
+
+This FFmpeg build was configured with GPL and GPLv3 components and is
+distributed under the GNU General Public License version 3 or later.
+FFmpeg is a separate work and is not owned by HovaIT.
+
+License text:
+https://www.gnu.org/licenses/gpl-3.0.txt
+
+FFmpeg project and source code:
+https://ffmpeg.org/
+https://ffmpeg.org/download.html#get-sources
+
+Build provider:
+https://www.gyan.dev/ffmpeg/builds/
+
+The exact FFmpeg version and build configuration can be displayed from
+HovaCut's FFmpeg status or by running: ffmpeg.exe -version

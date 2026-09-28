@@ -46,16 +46,18 @@ HovaCut Desktop sử dụng:
 
 - Windows 10/11 64-bit.
 - Microsoft Edge WebView2 Runtime.
-- FFmpeg có hỗ trợ H.264/AAC.
+- FFmpeg được đóng gói sẵn trong bộ cài (có hỗ trợ H.264/AAC).
 - Khi build mã nguồn: Rust, Node.js, Bun và Visual Studio Build Tools với workload **Desktop development with C++**.
 
-HovaCut ưu tiên FFmpeg tại:
+Khi build, script tìm FFmpeg theo thứ tự:
 
 ```text
+HOVACUT_FFMPEG_PATH
 E:\CGT Auto Tools v1.3.0\ffmpeg.exe
+ffmpeg.exe trong PATH
 ```
 
-Nếu không tìm thấy, ứng dụng sử dụng `ffmpeg.exe` có trong biến môi trường `PATH`.
+File tìm được được đóng gói vào installer. Sau khi cài, HovaCut ưu tiên FFmpeg đi kèm ứng dụng nên máy người dùng không cần cài CTG hoặc FFmpeg riêng.
 
 ## Cài đặt
 

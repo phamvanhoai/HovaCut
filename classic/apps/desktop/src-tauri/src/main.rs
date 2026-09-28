@@ -978,6 +978,14 @@ fn ffmpeg_path() -> PathBuf {
             return PathBuf::from(configured);
         }
     }
+    if let Ok(executable) = env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            let bundled = directory.join("ffmpeg.exe");
+            if bundled.is_file() {
+                return bundled;
+            }
+        }
+    }
     let cgt = PathBuf::from(r"E:\CGT Auto Tools v1.3.0\ffmpeg.exe");
     if cgt.is_file() {
         cgt

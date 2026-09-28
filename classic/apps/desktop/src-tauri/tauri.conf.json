@@ -33,6 +33,10 @@
 		"copyright": "Copyright © 2026 HovaIT. All rights reserved.",
 		"shortDescription": "HovaCut Desktop Video Editor by HovaIT",
 		"longDescription": "HovaCut is a desktop video editor and media automation suite developed by HovaIT.",
+		"resources": {
+			"resources/ffmpeg.exe": "ffmpeg.exe",
+			"resources/FFMPEG-LICENSE.txt": "FFMPEG-LICENSE.txt"
+		},
 		"icon": ["../../web/public/favicon.ico"]
 	}
 }
