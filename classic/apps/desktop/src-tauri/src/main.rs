@@ -28,26 +28,78 @@ fn start_frontend_server() -> Result<Option<Child>, String> {
     if frontend_is_ready() {
         return Ok(None);
     }
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let web_directory = manifest
-        .parent()
-        .and_then(Path::parent)
-        .ok_or_else(|| "Không tìm thấy thư mục frontend HovaCut.".to_string())?
-        .join("web");
-    let next = web_directory
-        .join("node_modules")
-        .join(".bin")
-        .join("next.exe");
-    if !next.is_file() {
-        return Err(format!("Không tìm thấy Next.js tại {}", next.display()));
-    }
-    let mut command = Command::new(next);
+
+    #[cfg(debug_assertions)]
+    let (program, working_directory, arguments) = {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let web_directory = manifest
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| "Không tìm thấy thư mục frontend HovaCut.".to_string())?
+            .join("web");
+        let next = web_directory
+            .join("node_modules")
+            .join(".bin")
+            .join("next.exe");
+        if !next.is_file() {
+            return Err(format!("Không tìm thấy Next.js tại {}", next.display()));
+        }
+        (next, web_directory, vec!["dev", "--webpack"])
+    };
+
+    #[cfg(not(debug_assertions))]
+    let (program, working_directory, arguments) = {
+        let executable_directory = env::current_exe()
+            .map_err(|error| error.to_string())?
+            .parent()
+            .ok_or_else(|| "Cannot locate the HovaCut install directory.".to_string())?
+            .to_path_buf();
+        let frontend_directory = [
+            executable_directory.join("frontend"),
+            executable_directory.join("resources").join("frontend"),
+        ]
+        .into_iter()
+        .find(|directory| directory.join("node.exe").is_file())
+        .ok_or_else(|| "Cannot locate the packaged HovaCut frontend.".to_string())?;
+        let server_directory = frontend_directory.join("apps").join("web");
+        let server = server_directory.join("server.js");
+        if !server.is_file() {
+            return Err(format!(
+                "Cannot locate the frontend server at {}",
+                server.display()
+            ));
+        }
+        (
+            frontend_directory.join("node.exe"),
+            server_directory,
+            vec!["server.js"],
+        )
+    };
+
+    let mut command = Command::new(program);
     command
-        .current_dir(web_directory)
-        .args(["dev", "--webpack"])
+        .current_dir(working_directory)
+        .args(arguments)
+        .env("HOSTNAME", "127.0.0.1")
+        .env("PORT", "3000")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    #[cfg(not(debug_assertions))]
+    command
+        .env("NODE_ENV", "production")
+        .env("NEXT_PUBLIC_SITE_URL", "http://127.0.0.1:3000")
+        .env("NEXT_PUBLIC_MARBLE_API_URL", "https://api.marblecms.com")
+        .env("DATABASE_URL", "postgres://localhost/hovacut_desktop")
+        .env(
+            "BETTER_AUTH_SECRET",
+            "hovacut-desktop-local-only-secret-key",
+        )
+        .env("UPSTASH_REDIS_REST_URL", "http://127.0.0.1")
+        .env("UPSTASH_REDIS_REST_TOKEN", "desktop")
+        .env("MARBLE_WORKSPACE_KEY", "desktop")
+        .env("FREESOUND_CLIENT_ID", "desktop")
+        .env("FREESOUND_API_KEY", "desktop");
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     let child = command.spawn().map_err(|error| error.to_string())?;

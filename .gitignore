@@ -8,3 +8,6 @@ docs/
 
 # moon runtime cache
 .moon/cache/
+.next/
+classic/apps/desktop/frontend/*
+!classic/apps/desktop/frontend/.gitkeep

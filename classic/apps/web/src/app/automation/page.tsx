@@ -1660,7 +1660,7 @@ function pickRandomFiles({ files, count }: { files: File[]; count: number }) {
 	return shuffleFiles(files).slice(0, count);
 }
 
-function shuffleFiles(files: File[]) {
+function shuffleFiles<T>(files: T[]): T[] {
 	const result = [...files];
 	for (let index = result.length - 1; index > 0; index--) {
 		const target = Math.floor(Math.random() * (index + 1));

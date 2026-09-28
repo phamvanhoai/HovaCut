@@ -152,6 +152,21 @@ export const ACTIONS = {
 
 export type TAction = keyof typeof ACTIONS;
 
+const OPTIONAL_ARG_ACTIONS = new Set<string>([
+	"seek-forward",
+	"seek-backward",
+	"jump-forward",
+	"jump-backward",
+]);
+
+export function isActionWithOptionalArgs(
+	value: string,
+): value is TActionWithOptionalArgs {
+	if (!(value in ACTIONS)) return false;
+	const definition = ACTIONS[value as TAction];
+	return !("args" in definition) || OPTIONAL_ARG_ACTIONS.has(value);
+}
+
 const ACTION_DEFAULT_SHORTCUTS = [
 	["toggle-play", ["space", "k"]],
 	["seek-forward", ["l"]],

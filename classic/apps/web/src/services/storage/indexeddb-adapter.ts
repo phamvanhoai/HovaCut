@@ -5,18 +5,22 @@ export class IndexedDBAdapter<T> implements StorageAdapter<T> {
 	private storeName: string;
 	private version: number;
 
-	constructor({
-		dbName,
-		storeName,
-		version = 1,
-	}: {
-		dbName: string;
-		storeName: string;
-		version?: number;
-	}) {
-		this.dbName = dbName;
-		this.storeName = storeName;
-		this.version = version;
+	constructor(config: { dbName: string; storeName: string; version?: number });
+	constructor(dbName: string, storeName: string, version?: number);
+	constructor(
+		configOrDbName: { dbName: string; storeName: string; version?: number } | string,
+		legacyStoreName?: string,
+		legacyVersion = 1,
+	) {
+		if (typeof configOrDbName === "string") {
+			this.dbName = configOrDbName;
+			this.storeName = legacyStoreName ?? "items";
+			this.version = legacyVersion;
+			return;
+		}
+		this.dbName = configOrDbName.dbName;
+		this.storeName = configOrDbName.storeName;
+		this.version = configOrDbName.version ?? 1;
 	}
 
 	private async getDB(): Promise<IDBDatabase> {
@@ -47,13 +51,12 @@ export class IndexedDBAdapter<T> implements StorageAdapter<T> {
 		});
 	}
 
-	async set({
-		key,
-		value,
-	}: {
-		key: string;
-		value: T;
-	}): Promise<void> {
+	async set(args: { key: string; value: T }): Promise<void>;
+	async set(key: string, value: T): Promise<void>;
+	async set(argsOrKey: { key: string; value: T } | string, legacyValue?: T): Promise<void> {
+		const key = typeof argsOrKey === "string" ? argsOrKey : argsOrKey.key;
+		const value = typeof argsOrKey === "string" ? legacyValue : argsOrKey.value;
+		if (value === undefined) throw new Error("IndexedDB value is required");
 		const db = await this.getDB();
 		const transaction = db.transaction([this.storeName], "readwrite");
 		const store = transaction.objectStore(this.storeName);
