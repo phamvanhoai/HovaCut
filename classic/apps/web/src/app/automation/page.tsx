@@ -186,6 +186,10 @@ export default function AutomationPage() {
 		upper: "",
 		title: "",
 	});
+	const [convertNameMode, setConvertNameMode] = useState<
+		"song" | "without-singer" | "without-author" | "without-singer-keep-author"
+	>("song");
+	const [convertNameResult, setConvertNameResult] = useState("");
 	const [desktopVideoEncoders, setDesktopVideoEncoders] = useState<string[]>(
 		[],
 	);
@@ -850,6 +854,25 @@ export default function AutomationPage() {
 	};
 	const copyConvertedText = async (value: string) => {
 		await navigator.clipboard.writeText(value);
+	};
+	const handleConvertMusicNames = () => {
+		const timestamp = /^\s*(?:(?:\d{1,2}:)?\d{1,2}:\d{2})\s*(?:[-–—|.]\s*)?/u;
+		const result = convertTextInput
+			.split(/\r?\n/u)
+			.map((sourceLine) => {
+				const line = sourceLine.trim();
+				if (!line) return "";
+				if (convertNameMode === "song") return line.replace(timestamp, "").trim();
+
+				const parts = line.split(/\s+(?:-|–|—|\|)\s+/u).map((part) => part.trim());
+				if (parts.length < 2) return line;
+				if (convertNameMode === "without-singer") return parts[0];
+				if (convertNameMode === "without-author") return parts.slice(0, -1).join(" - ");
+				if (parts.length < 3) return parts[0];
+				return [parts[0], ...parts.slice(2)].join(" - ");
+			})
+			.join("\n");
+		setConvertNameResult(result);
 	};
 	const saveConvertedText = async (value: string, defaultPath: string) => {
 		if (!window.__TAURI__ || !value) return;
@@ -2016,10 +2039,11 @@ export default function AutomationPage() {
 										</Button>
 										<Button
 											type="button"
-											variant="outline"
-											onClick={() => {
-												setConvertTextInput("");
-												setConvertTextResult({ lower: "", upper: "", title: "" });
+										variant="outline"
+										onClick={() => {
+											setConvertTextInput("");
+											setConvertTextResult({ lower: "", upper: "", title: "" });
+											setConvertNameResult("");
 											}}
 										>
 											Xóa tất cả
@@ -2045,6 +2069,40 @@ export default function AutomationPage() {
 											<textarea className="min-h-24 w-full rounded-md border bg-muted/30 p-3 text-sm" readOnly value={convertTextResult[key]} />
 										</div>
 									))}
+									<div className="space-y-3 rounded-md border p-3">
+										<Label>Xử lý tên bài hát</Label>
+										<div className="grid gap-2">
+											{([
+												["Lấy tên bài (xóa Time)", "song"],
+												["Xóa tên Ca Sĩ (Lấy time + tên bài)", "without-singer"],
+												["Xóa tên tác giả", "without-author"],
+												["Xóa tên ca sĩ (Lấy time + tên bài + tác giả)", "without-singer-keep-author"],
+											] as const).map(([label, value]) => (
+												<label key={value} className="flex items-center gap-2 text-sm">
+													<input
+														type="radio"
+														name="convert-name-mode"
+														checked={convertNameMode === value}
+														onChange={() => setConvertNameMode(value)}
+													/>
+													{label}
+												</label>
+											))}
+										</div>
+										<div className="flex flex-wrap gap-2">
+											<Button type="button" onClick={handleConvertMusicNames} disabled={!convertTextInput}>
+												Xử lý tên bài
+											</Button>
+											<Button type="button" variant="ghost" size="sm" disabled={!convertNameResult} onClick={() => void copyConvertedText(convertNameResult)}>
+												Sao chép
+											</Button>
+											<Button type="button" variant="ghost" size="sm" disabled={!convertNameResult} onClick={() => void saveConvertedText(convertNameResult, "ten-bai-da-xu-ly.txt")}>
+												Lưu TXT
+											</Button>
+										</div>
+										<textarea className="min-h-28 w-full rounded-md border bg-muted/30 p-3 text-sm" readOnly value={convertNameResult} />
+										<p className="text-xs text-muted-foreground">Định dạng: TIME Tên bài - Ca sĩ - Tác giả. Cũng hỗ trợ dấu –, — và |.</p>
+									</div>
 								</div>
 								<form className="space-y-4 rounded-md border p-4" onSubmit={handleCreateFileList}>
 									<h3 className="font-medium">Tạo danh sách từ thư mục</h3>
