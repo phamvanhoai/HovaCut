@@ -4,14 +4,61 @@ use std::{
     env, fs,
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
     thread,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::Emitter;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 static CANCEL_NATIVE_RENDER: AtomicBool = AtomicBool::new(false);
+
+fn frontend_is_ready() -> bool {
+    std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:3000".parse().expect("valid frontend address"),
+        Duration::from_millis(250),
+    )
+    .is_ok()
+}
+
+fn start_frontend_server() -> Result<Option<Child>, String> {
+    if frontend_is_ready() {
+        return Ok(None);
+    }
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let web_directory = manifest
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| "Không tìm thấy thư mục frontend HovaCut.".to_string())?
+        .join("web");
+    let next = web_directory
+        .join("node_modules")
+        .join(".bin")
+        .join("next.exe");
+    if !next.is_file() {
+        return Err(format!("Không tìm thấy Next.js tại {}", next.display()));
+    }
+    let mut command = Command::new(next);
+    command
+        .current_dir(web_directory)
+        .args(["dev", "--webpack"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let child = command.spawn().map_err(|error| error.to_string())?;
+    for _ in 0..240 {
+        if frontend_is_ready() {
+            return Ok(Some(child));
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    Err("Frontend HovaCut không khởi động sau 60 giây.".into())
+}
 
 #[tauri::command]
 fn list_media_files(directory: String, extensions: Vec<String>) -> Result<Vec<String>, String> {
@@ -982,6 +1029,8 @@ fn render_image_audio(
 }
 
 fn main() {
+    let mut frontend_process = start_frontend_server()
+        .unwrap_or_else(|error| panic!("Không thể khởi động giao diện HovaCut: {error}"));
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -1002,4 +1051,8 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động HovaCut Desktop");
+    if let Some(process) = frontend_process.as_mut() {
+        let _ = process.kill();
+        let _ = process.wait();
+    }
 }
