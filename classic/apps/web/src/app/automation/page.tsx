@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
 	useEffect,
 	useRef,
@@ -892,9 +891,12 @@ export default function AutomationPage() {
 			<header className="border-b bg-background">
 				<div className="flex h-16 w-full items-center gap-4 px-5">
 					<Button asChild variant="ghost" size="icon">
-						<Link href="/projects" aria-label="Quay lại projects">
+						<a
+							href={desktopMode ? "/projects/index.html" : "/projects"}
+							aria-label="Quay lại projects"
+						>
 							<ArrowLeft />
-						</Link>
+						</a>
 					</Button>
 					<div>
 						<h1 className="text-lg font-semibold">HovaCut Automation</h1>

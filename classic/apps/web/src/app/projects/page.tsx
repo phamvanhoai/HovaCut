@@ -1,7 +1,6 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { useEffect, useState } from "react";
@@ -51,8 +50,24 @@ function editorPath(projectId: string): string {
 		typeof window !== "undefined" &&
 		Boolean((window as Window & { __TAURI__?: unknown }).__TAURI__);
 	return isDesktop
-		? `/editor/desktop/?project_id=${encodeURIComponent(projectId)}`
+		? `/editor/desktop/index.html?project_id=${encodeURIComponent(projectId)}`
 		: `/editor/${projectId}`;
+}
+
+function desktopPath(webPath: string, filePath: string): string {
+	return typeof window !== "undefined" &&
+		Boolean((window as Window & { __TAURI__?: unknown }).__TAURI__)
+		? filePath
+		: webPath;
+}
+
+function openEditor(projectId: string, router: { push: (path: string) => void }) {
+	const path = editorPath(projectId);
+	if (path.includes("/index.html")) {
+		window.location.href = path;
+	} else {
+		router.push(path);
+	}
 }
 import { OcVideoIcon } from "@/components/icons";
 import { Label } from "@/components/ui/label";
@@ -172,7 +187,7 @@ function ProjectsHeader() {
 		if (typeof inputPath !== "string") return;
 		try {
 			const projectId = await editor.project.importDesktopProject({ inputPath });
-			router.push(editorPath(projectId));
+			openEditor(projectId, router);
 		} catch (error) {
 			toast.error("Không thể mở project", {
 				description: error instanceof Error ? error.message : "File không hợp lệ",
@@ -188,9 +203,9 @@ function ProjectsHeader() {
 						<BreadcrumbList>
 							<BreadcrumbItem>
 								<BreadcrumbLink asChild>
-									<Link href="/" className="text-sm sm:text-base">
+									<a href={desktopPath("/", "/automation/index.html")} className="text-sm sm:text-base">
 										Home
-									</Link>
+									</a>
 								</BreadcrumbLink>
 							</BreadcrumbItem>
 							<BreadcrumbSeparator />
@@ -230,7 +245,7 @@ function ProjectsHeader() {
 						</Button>
 					) : null}
 					<Button asChild variant="outline" size="lg">
-						<Link href="/automation">Automation</Link>
+						<a href={desktopPath("/automation", "/automation/index.html")}>Automation</a>
 					</Button>
 					<NewProjectButton />
 				</div>
@@ -586,7 +601,7 @@ function NewProjectButton() {
 		const projectId = await editor.project.createNewProject({
 			name: "New project",
 		});
-		router.push(editorPath(projectId));
+		openEditor(projectId, router);
 	};
 
 	return (
@@ -738,9 +753,9 @@ function ProjectItem({
 				className="size-5 shrink-0"
 			/>
 
-			<Link href={editorPath(project.id)} className="flex-1 min-w-0">
+			<a href={editorPath(project.id)} className="flex-1 min-w-0">
 				{listRowContent}
-			</Link>
+			</a>
 
 			{!isMultiSelect && (
 				<ProjectMenu
@@ -763,9 +778,9 @@ function ProjectItem({
 					<div className="group relative">
 						{isGridView ? (
 							<>
-								<Link href={editorPath(project.id)} className="block">
+								<a href={editorPath(project.id)} className="block">
 									{gridContent}
-								</Link>
+								</a>
 
 								<Checkbox
 									checked={isSelected}
@@ -1032,7 +1047,7 @@ function EmptyState() {
 			const projectId = await editor.project.createNewProject({
 				name: "New project",
 			});
-			router.push(editorPath(projectId));
+			openEditor(projectId, router);
 		} catch (error) {
 			toast.error("Failed to create project", {
 				description:

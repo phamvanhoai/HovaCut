@@ -64,7 +64,7 @@ export function EditorProvider({ projectId, children }: EditorProviderProps) {
 						);
 						router.replace(
 							isDesktop
-								? `/editor/desktop/?project_id=${encodeURIComponent(newProjectId)}`
+								? `/editor/desktop/index.html?project_id=${encodeURIComponent(newProjectId)}`
 								: `/editor/${newProjectId}`,
 						);
 					} catch (_createErr) {

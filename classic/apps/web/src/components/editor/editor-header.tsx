@@ -63,7 +63,11 @@ function ProjectDropdown() {
 			console.error("Failed to prepare project exit:", error);
 		} finally {
 			editor.project.closeProject();
-			router.push("/projects");
+			if ((window as Window & { __TAURI__?: unknown }).__TAURI__) {
+				window.location.href = "/projects/index.html";
+			} else {
+				router.push("/projects");
+			}
 		}
 	};
 
@@ -95,7 +99,11 @@ function ProjectDropdown() {
 				await editor.project.deleteProjects({
 					ids: [activeProject.metadata.id],
 				});
-				router.push("/projects");
+				if ((window as Window & { __TAURI__?: unknown }).__TAURI__) {
+					window.location.href = "/projects/index.html";
+				} else {
+					router.push("/projects");
+				}
 			} catch (error) {
 				toast.error("Failed to delete project", {
 					description:
