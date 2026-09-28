@@ -1176,21 +1176,10 @@ fn render_auto_video(
         .collect::<Vec<_>>()
         .join("\n");
     fs::write(&list_path, list).map_err(|error| error.to_string())?;
-    let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p");
+    let filter = format!("scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p");
     let video_encoder = resolve_h264_encoder(&encoder);
-    let (speed_option, speed_value) = if video_encoder == "h264_amf" {
-        ("-quality", "speed")
-    } else {
-        (
-            "-preset",
-            if video_encoder == "libx264" {
-                "medium"
-            } else {
-                "fast"
-            },
-        )
-    };
-    let result = Command::new(ffmpeg_path())
+    let mut command = Command::new(ffmpeg_path());
+    command
         .args([
             "-y",
             "-stream_loop",
@@ -1213,8 +1202,25 @@ fn render_auto_video(
             &filter,
             "-c:v",
             video_encoder,
-            speed_option,
-            speed_value,
+        ]);
+    match video_encoder {
+        "h264_nvenc" => {
+            command.args(["-preset", "slow", "-rc", "vbr", "-cq", "20", "-b:v", "0"]);
+        }
+        "h264_qsv" => {
+            command.args(["-preset", "medium", "-global_quality", "20"]);
+        }
+        "h264_amf" => {
+            command.args([
+                "-quality", "quality", "-rc", "cqp", "-qp_i", "20", "-qp_p", "22", "-qp_b", "24",
+            ]);
+        }
+        _ => {
+            command.args(["-preset", "medium", "-crf", "20"]);
+        }
+    }
+    let result = command
+        .args([
             "-c:a",
             "aac",
             "-b:a",
