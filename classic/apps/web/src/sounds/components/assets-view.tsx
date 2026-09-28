@@ -23,6 +23,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { useSoundSearch } from "@/sounds/use-sound-search";
+import { searchSounds } from "@/sounds/search-sounds";
 import { useSoundsStore } from "@/sounds/sounds-store";
 import type { SavedSound, SoundEffect } from "@/sounds/types";
 import { cn } from "@/utils/ui";
@@ -78,6 +79,7 @@ function SoundEffectsView() {
 		setTopSoundEffects,
 		setLoading,
 		setError,
+		error: soundError,
 		setHasLoaded,
 		setCurrentPage,
 		setHasNextPage,
@@ -95,6 +97,8 @@ function SoundEffectsView() {
 	});
 
 	const [playingId, setPlayingId] = useState<number | null>(null);
+	const [freesoundApiKey, setFreesoundApiKey] = useState("");
+	const [isSavingApiKey, setIsSavingApiKey] = useState(false);
 	const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(
 		null,
 	);
@@ -123,16 +127,13 @@ function SoundEffectsView() {
 					setError({ error: null });
 				}
 
-				const response = await fetch(
-					"/api/sounds/search?page_size=50&sort=downloads",
-				);
+				const data = await searchSounds({
+					pageSize: 50,
+					sort: "downloads",
+					commercialOnly: showCommercialOnly,
+				});
 
 				if (!shouldIgnore) {
-					if (!response.ok) {
-						throw new Error(`Failed to fetch: ${response.status}`);
-					}
-
-					const data = await response.json();
 					setTopSoundEffects({ sounds: data.results });
 					setHasLoaded({ loaded: true });
 
@@ -163,6 +164,7 @@ function SoundEffectsView() {
 		};
 	}, [
 		hasLoaded,
+		showCommercialOnly,
 		setTopSoundEffects,
 		setLoading,
 		setError,
@@ -195,6 +197,24 @@ function SoundEffectsView() {
 	};
 
 	const displayedSounds = searchQuery ? searchResults : topSoundEffects;
+	const saveFreesoundApiKey = async () => {
+		if (!window.__TAURI__ || !freesoundApiKey.trim()) return;
+		try {
+			setIsSavingApiKey(true);
+			await window.__TAURI__.core.invoke("save_freesound_api_key", {
+				apiKey: freesoundApiKey.trim(),
+			});
+			setFreesoundApiKey("");
+			setError({ error: null });
+			setHasLoaded({ loaded: false });
+		} catch (error) {
+			setError({
+				error: error instanceof Error ? error.message : String(error),
+			});
+		} finally {
+			setIsSavingApiKey(false);
+		}
+	};
 
 	const playSound = ({ sound }: { sound: SoundEffect }) => {
 		if (playingId === sound.id) {
@@ -225,6 +245,30 @@ function SoundEffectsView() {
 
 	return (
 		<div className="mt-1 flex h-full flex-col gap-5">
+			{soundError && (
+				<div className="border-destructive/40 bg-destructive/5 space-y-2 rounded-md border p-3">
+					<p className="text-destructive text-xs">{soundError}</p>
+					{typeof window !== "undefined" && window.__TAURI__ && (
+						<div className="flex gap-2">
+							<Input
+								type="password"
+								placeholder="Freesound API Key"
+								value={freesoundApiKey}
+								onChange={({ currentTarget }) =>
+									setFreesoundApiKey(currentTarget.value)
+								}
+							/>
+							<Button
+								size="sm"
+								disabled={isSavingApiKey || !freesoundApiKey.trim()}
+								onClick={saveFreesoundApiKey}
+							>
+								Lưu khóa
+							</Button>
+						</div>
+					)}
+				</div>
+			)}
 			<div className="flex items-center gap-3">
 				<Input
 					placeholder="Search sound effects"

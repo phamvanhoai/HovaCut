@@ -13,6 +13,173 @@ use tauri::Emitter;
 
 static CANCEL_NATIVE_RENDER: AtomicBool = AtomicBool::new(false);
 
+fn freesound_api_key() -> Result<String, String> {
+    let path = application_data_directory()?.join("settings.json");
+    if path.is_file() {
+        let data: Value = serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        if let Some(value) = data.get("freesoundApiKey").and_then(Value::as_str) {
+            if !value.trim().is_empty() {
+                return Ok(value.trim().to_owned());
+            }
+        }
+    }
+    option_env!("HOVACUT_FREESOUND_API_KEY")
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| "Chưa cấu hình Freesound API Key trong HovaCut.".to_string())
+}
+
+#[tauri::command]
+fn save_freesound_api_key(api_key: String) -> Result<(), String> {
+    let api_key = api_key.trim();
+    if api_key.len() < 20 || !api_key.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("Freesound API Key không hợp lệ.".into());
+    }
+    let path = application_data_directory()?.join("settings.json");
+    let mut data = if path.is_file() {
+        serde_json::from_slice::<Value>(&fs::read(&path).map_err(|e| e.to_string())?)
+            .unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    data["freesoundApiKey"] = Value::String(api_key.to_owned());
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(&data).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+struct FreesoundSearchResult {
+    id: u64,
+    name: String,
+    #[serde(default)]
+    description: String,
+    url: String,
+    previews: Option<Value>,
+    download: Option<String>,
+    duration: f64,
+    filesize: u64,
+    #[serde(rename = "type")]
+    media_type: String,
+    channels: u32,
+    bitrate: u32,
+    bitdepth: u32,
+    samplerate: f64,
+    username: String,
+    tags: Vec<String>,
+    license: String,
+    created: String,
+    #[serde(default)]
+    num_downloads: u64,
+    #[serde(default)]
+    avg_rating: f64,
+    #[serde(default)]
+    num_ratings: u64,
+}
+
+#[derive(Deserialize)]
+struct FreesoundSearchResponse {
+    count: u64,
+    next: Option<String>,
+    previous: Option<String>,
+    results: Vec<FreesoundSearchResult>,
+}
+
+#[tauri::command]
+fn search_sounds(
+    query: Option<String>,
+    page: Option<u32>,
+    page_size: Option<u32>,
+    sort: Option<String>,
+    min_rating: Option<f64>,
+    commercial_only: Option<bool>,
+) -> Result<Value, String> {
+    let token = freesound_api_key()?;
+    let query = query.unwrap_or_default();
+    if query.len() > 500 {
+        return Err("Từ khóa tìm kiếm quá dài.".into());
+    }
+    let page = page.unwrap_or(1).clamp(1, 1000);
+    let page_size = page_size.unwrap_or(20).clamp(1, 150);
+    let sort = sort.unwrap_or_else(|| "downloads".into());
+    let sort = match sort.as_str() {
+        "rating" | "created" | "score" => sort,
+        _ => "downloads".into(),
+    };
+    let sort_parameter = if query.is_empty() {
+        format!("{sort}_desc")
+    } else if sort == "score" {
+        "score".into()
+    } else {
+        format!("{sort}_desc")
+    };
+    let mut url = reqwest::Url::parse("https://freesound.org/apiv2/search/text/")
+        .map_err(|error| error.to_string())?;
+    {
+        let mut params = url.query_pairs_mut();
+        params
+            .append_pair("query", &query)
+            .append_pair("token", &token)
+            .append_pair("page", &page.to_string())
+            .append_pair("page_size", &page_size.to_string())
+            .append_pair("sort", &sort_parameter)
+            .append_pair("fields", "id,name,description,url,previews,download,duration,filesize,type,channels,bitrate,bitdepth,samplerate,username,tags,license,created,num_downloads,avg_rating,num_ratings")
+            .append_pair("filter", "duration:[* TO 30.0]")
+            .append_pair(
+                "filter",
+                &format!("avg_rating:[{} TO *]", min_rating.unwrap_or(3.0).clamp(0.0, 5.0)),
+            )
+            .append_pair("filter", "tag:sound-effect OR tag:sfx OR tag:foley OR tag:ambient OR tag:nature OR tag:mechanical OR tag:electronic OR tag:impact OR tag:whoosh OR tag:explosion");
+        if commercial_only.unwrap_or(true) {
+            params.append_pair("filter", "license:(\"Attribution\" OR \"Creative Commons 0\" OR \"Attribution Noncommercial\" OR \"Attribution Commercial\")");
+        }
+    }
+    let response = reqwest::blocking::Client::builder()
+        .user_agent("HovaCut Desktop/0.1")
+        .build()
+        .map_err(|error| error.to_string())?
+        .get(url)
+        .send()
+        .map_err(|error| format!("Không thể kết nối Freesound: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Freesound trả về lỗi HTTP {status}."));
+    }
+    let data: FreesoundSearchResponse = response
+        .json()
+        .map_err(|error| format!("Dữ liệu Freesound không hợp lệ: {error}"))?;
+    let results: Vec<Value> = data
+        .results
+        .into_iter()
+        .map(|sound| {
+            let preview_url = sound.previews.as_ref().and_then(|previews| {
+                previews
+                    .get("preview-hq-mp3")
+                    .or_else(|| previews.get("preview-lq-mp3"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
+            serde_json::json!({
+                "id": sound.id, "name": sound.name, "description": sound.description,
+                "url": sound.url, "previewUrl": preview_url, "downloadUrl": sound.download,
+                "duration": sound.duration, "filesize": sound.filesize, "type": sound.media_type,
+                "channels": sound.channels, "bitrate": sound.bitrate, "bitdepth": sound.bitdepth,
+                "samplerate": sound.samplerate, "username": sound.username, "tags": sound.tags,
+                "license": sound.license, "created": sound.created, "downloads": sound.num_downloads,
+                "rating": sound.avg_rating, "ratingCount": sound.num_ratings
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({
+        "count": data.count, "next": data.next, "previous": data.previous,
+        "results": results, "query": query, "type": "effects", "page": page,
+        "pageSize": page_size, "sort": sort, "minRating": min_rating.unwrap_or(3.0)
+    }))
+}
+
 #[tauri::command]
 fn list_media_files(directory: String, extensions: Vec<String>) -> Result<Vec<String>, String> {
     let root = PathBuf::from(directory);
@@ -1250,7 +1417,9 @@ fn main() {
             render_auto_mp3,
             render_join_audio,
             convert_media,
-            render_image_audio
+            render_image_audio,
+            search_sounds,
+            save_freesound_api_key
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động HovaCut Desktop");
